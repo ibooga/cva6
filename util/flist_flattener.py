@@ -37,9 +37,11 @@ def parseFlist(inFlist, outFlist, printIncdir, printNewline):
                 printLine(outFlist, line, printNewline)
         elif line.startswith('-F'):
             includedFilename = line.lstrip('-F').strip()
-            if not os.path.exists(includedFilename):
-                raise (RuntimeError(f'{includedFilename} not found'))
-            with open(includedFilename, 'r') as includedFlist:
+            includePath = os.path.join(os.path.dirname(inFlist.name),
+                                       includedFilename)
+            if not os.path.exists(includePath):
+                raise RuntimeError(f'{includePath} not found')
+            with open(includePath, 'r') as includedFlist:
                 parseFlist(includedFlist, outFlist, printIncdir, printNewline)
         elif line:
             printLine(outFlist, line, printNewline)
