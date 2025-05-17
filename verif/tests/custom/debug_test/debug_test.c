@@ -138,6 +138,15 @@ void check_illegal_insn_status(int tag, int value)
     TEST_FAILED;
   }
 }
+
+void check_csr_unchanged(int tag, const char *name, unsigned int before,
+                          unsigned int after) {
+  if (before != after) {
+    printf("ERROR: %s modified during debug (Tag=%d) before=0x%x after=0x%x\n",
+           name, tag, before, after);
+    TEST_FAILED;
+  }
+}
 void delay(int count) {
     for (volatile int d = 0; d < count; d++);
 }
@@ -354,40 +363,57 @@ int main(int argc, char *argv[])
     printf("------------------------\n");
     printf(" Test11: check illegal csr exception during debug launches debugger exception and no csr modified\n");
     glb_hart_status = 11;
+    unsigned int ms_before, mie_before, ms_after, mie_after;
+    asm volatile("csrr %0, mstatus" : "=r"(ms_before));
+    asm volatile("csrr %0, mie" : "=r"(mie_before));
     glb_expect_debug_entry = 1;
     glb_expect_debug_exception = 1;
     DEBUG_REQ_CONTROL_REG = debug_req_control.bits;
     while(glb_debug_status != glb_hart_status){
       printf("Wait for Debugger\n");
     }
+    asm volatile("csrr %0, mstatus" : "=r"(ms_after));
+    asm volatile("csrr %0, mie" : "=r"(mie_after));
     check_debug_status(111,glb_hart_status);
     check_debug_exception_status(111,glb_hart_status);
-    //FIXME TBD BUG : need to update test to check actual csrs not modified.
+    check_csr_unchanged(111, "mstatus", ms_before, ms_after);
+    check_csr_unchanged(111, "mie", mie_before, mie_after);
 
     printf("------------------------\n");
     printf(" Test12: check ecall exception during debug launches debugger exception and no csr modified\n");
     glb_hart_status = 12;
+    asm volatile("csrr %0, mstatus" : "=r"(ms_before));
+    asm volatile("csrr %0, mie" : "=r"(mie_before));
     glb_expect_debug_entry = 1;
     glb_expect_debug_exception = 1;
     DEBUG_REQ_CONTROL_REG = debug_req_control.bits;
     while(glb_debug_status != glb_hart_status){
       printf("Wait for Debugger\n");
     }
+    asm volatile("csrr %0, mstatus" : "=r"(ms_after));
+    asm volatile("csrr %0, mie" : "=r"(mie_after));
     check_debug_status(112,glb_hart_status);
     check_debug_exception_status(112,glb_hart_status);
-    //FIXME TBD BUG : need to update test to check actual csrs not modified.
+    check_csr_unchanged(112, "mstatus", ms_before, ms_after);
+    check_csr_unchanged(112, "mie", mie_before, mie_after);
 
     printf("------------------------\n");
     printf(" Test13: check mret during debug launches debugger exception and no csr modified\n");
     glb_hart_status = 13;
+    asm volatile("csrr %0, mstatus" : "=r"(ms_before));
+    asm volatile("csrr %0, mie" : "=r"(mie_before));
     glb_expect_debug_entry = 1;
     glb_expect_debug_exception = 1;
     DEBUG_REQ_CONTROL_REG = debug_req_control.bits;
     while(glb_debug_status != glb_hart_status){
       printf("Wait for Debugger\n");
     }
+    asm volatile("csrr %0, mstatus" : "=r"(ms_after));
+    asm volatile("csrr %0, mie" : "=r"(mie_after));
     check_debug_status(113,glb_hart_status);
     check_debug_exception_status(113,glb_hart_status);
+    check_csr_unchanged(113, "mstatus", ms_before, ms_after);
+    check_csr_unchanged(113, "mie", mie_before, mie_after);
 
     printf("------------------------\n");
     printf(" Test14: Check exception ebreak enters debug mode\n");
