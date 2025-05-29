@@ -154,8 +154,8 @@ module wt_hybche_subsystem
   );
 
 
-  // Use standard WT cache with hybrid capabilities disabled for now
-  // This ensures functionality while hybrid implementation is being completed
+  // Use standard WT cache with multi-driver fixes applied
+  // The hybrid cache implementation needs completion before it can be used
   
   // Local signals for memory interface
   logic adapter_data_req, data_adapter_ack, adapter_rtrn_vld;
@@ -250,11 +250,7 @@ module wt_hybche_subsystem
   );
 `endif
 
-  // Connect cache returns
-  assign adapter_data.rtype = wt_cache_pkg::DCACHE_LOAD_ACK;
-  assign adapter_data.inv = '0;
-
-  // SRAM interface - not used in standard WT cache
+  // SRAM interface - not used in standard WT cache but signals driven
   assign sram_en_o = 1'b0;
   assign sram_we_o = '0;
   assign sram_idx_o = '0;

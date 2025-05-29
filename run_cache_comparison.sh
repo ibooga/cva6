@@ -1,9 +1,19 @@
 #!/bin/bash
 
 # CVA6 Cache Comparison Test Script
-# Runs cache_test_loop.c with different cache configurations and generates heatmaps
+# Runs specified test with different cache configurations and generates heatmaps
 
 set -e
+
+# Check if test file is provided
+if [ $# -eq 0 ]; then
+    echo "Usage: $0 <test_file.c>"
+    echo "Example: $0 cache_block_sweep.c"
+    exit 1
+fi
+
+TEST_FILE="$1"
+TEST_NAME=$(basename "$TEST_FILE" .c)
 
 # Colors for output
 RED='\033[0;31m'
@@ -70,12 +80,18 @@ run_simulation() {
     # Clean previous build
     make clean > /dev/null 2>&1 || true
     
+    
+    
     # Run the simulation using cv32a60x target
-    timeout 300s python3 cva6.py \
+    
+echo -e "${BLUE}======================================${NC}"
+echo -e "${BLUE}IMMEDIATELY BEFORE PYTHON3 cva6.py${NC}"
+echo -e "${BLUE}======================================${NC}"
+    python3 cva6.py \
         --target cv32a60x \
         --iss=$DV_SIMULATORS \
         --iss_yaml=cva6.yaml \
-        --c_tests ../tests/custom/cache_test_loop.c \
+        --c_tests ../tests/custom/$TEST_FILE \
         --linker=../../config/gen_from_riscv_config/linker/link.ld \
         --gcc_opts="-static -mcmodel=medany -fvisibility=hidden -nostdlib -nostartfiles -g ../tests/custom/common/crt.S -lgcc -I../tests/custom/env -I../tests/custom/common" \
         > "../../$RESULTS_DIR/$results_subdir/simulation.log" 2>&1
@@ -114,7 +130,17 @@ for i in "${!CONFIGS[@]}"; do
     echo -e "\n${BLUE}[$((i+1))/${#CONFIGS[@]}] Testing $name Cache Configuration${NC}"
     echo -e "Configuration: $config"
     
+echo -e "${BLUE}======================================${NC}"
+echo -e "${BLUE}BEFORE A SIM IN THE LOOP${NC}"
+echo -e "${BLUE}======================================${NC}"
+    
     run_simulation "$config" "$name" "$results_subdir"
+
+echo -e "${BLUE}======================================${NC}"
+echo -e "${BLUE}AFTER A SIM IN THE LOOP${NC}"
+echo -e "${BLUE}======================================${NC}"
+    
+
 done
 
 cd ../..
@@ -129,7 +155,7 @@ cat > "$RESULTS_DIR/comparison_report.md" << EOF
 # CVA6 Cache Configuration Comparison
 
 ## Test Configuration
-- **Test Program**: cache_test_loop.c
+- **Test Program**: $TEST_FILE
 - **Array Size**: 256 elements
 - **Iterations**: 10
 - **Test Date**: $(date)

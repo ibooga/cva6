@@ -65,6 +65,15 @@ module wt_hybche #(
   input  dcache_req_i_t [CVA6Cfg.NrLoadPipeRegs+CVA6Cfg.NrStorePipeRegs-1:0] dcache_req_ports_i,
   output dcache_req_o_t [CVA6Cfg.NrLoadPipeRegs+CVA6Cfg.NrStorePipeRegs-1:0] dcache_req_ports_o,
   
+  // Cache status outputs
+  output logic                           dcache_miss_o,
+  output logic                           wbuffer_empty_o,
+  output logic                           wbuffer_not_ni_o,
+  output logic [CVA6Cfg.NrLoadPipeRegs+CVA6Cfg.NrStorePipeRegs-1:0][CVA6Cfg.DCACHE_SET_ASSOC-1:0] miss_vld_bits_o,
+  
+  // AMO interface (basic implementation)
+  output amo_resp_t                      dcache_amo_resp_o,
+  
   // AXI port
   output axi_req_t  axi_req_o,
   input  axi_resp_t axi_resp_i
@@ -148,15 +157,73 @@ module wt_hybche #(
   );
   
   // Additional internal signals needed for component interconnection
-  logic miss_req, miss_ack, miss_busy;
-  logic miss_nc;
-  logic [riscv::PLEN-1:0] miss_addr;
+  localparam int unsigned NumPorts = CVA6Cfg.NrLoadPipeRegs + CVA6Cfg.NrStorePipeRegs;
+  
+  // Miss interface signals
+  logic [NumPorts-1:0] miss_req, miss_ack, miss_we;
+  logic [NumPorts-1:0] miss_nc;
+  logic [NumPorts-1:0][riscv::PLEN-1:0] miss_paddr;
+  logic [NumPorts-1:0][CVA6Cfg.XLEN-1:0] miss_wdata;
+  logic [NumPorts-1:0][CVA6Cfg.DCACHE_USER_WIDTH-1:0] miss_wuser;
+  logic [NumPorts-1:0][2:0] miss_size;
+  logic [NumPorts-1:0][CVA6Cfg.MEM_TID_WIDTH-1:0] miss_id;
+  logic [NumPorts-1:0] miss_replay, miss_rtrn_vld;
+  logic [NumPorts-1:0][CVA6Cfg.DCACHE_SET_ASSOC-1:0] miss_vld_bits;
+  
+  // Read interface signals for memory access
+  logic [NumPorts-1:0][CVA6Cfg.DCACHE_TAG_WIDTH-1:0] rd_tag;
+  logic [NumPorts-1:0][CVA6Cfg.DCACHE_INDEX_WIDTH-1:0] rd_idx;
+  logic [NumPorts-1:0][CVA6Cfg.DCACHE_OFFSET_WIDTH-1:0] rd_off;
+  logic [NumPorts-1:0] rd_req, rd_tag_only, rd_ack;
+  logic [NumPorts-1:0] rd_prio;
+  
+  // Memory interface signals
+  logic [CVA6Cfg.DCACHE_LINE_WIDTH-1:0] rd_data;
+  logic [CVA6Cfg.DCACHE_USER_LINE_WIDTH-1:0] rd_user;
+  logic [CVA6Cfg.DCACHE_SET_ASSOC-1:0] rd_vld_bits, rd_hit_oh;
+  
+  // Write buffer interface signals  
+  logic wbuf_valid, wbuf_ready;
+  logic [riscv::PLEN-1:0] wbuf_addr;
+  logic [CVA6Cfg.XLEN-1:0] wbuf_wdata;
+  logic [CVA6Cfg.XLEN/8-1:0] wbuf_be;
+  logic wr_cl_vld;
+  
+  // Write buffer outputs for interface compatibility
+  logic [CVA6Cfg.DCACHE_SET_ASSOC-1:0] wr_req;
+  logic wr_ack;
+  logic [CVA6Cfg.DCACHE_INDEX_WIDTH-1:0] wr_idx;
+  logic [CVA6Cfg.DCACHE_OFFSET_WIDTH-1:0] wr_off;
+  logic [CVA6Cfg.XLEN-1:0] wr_data;
+  logic [CVA6Cfg.XLEN/8-1:0] wr_data_be;
+  logic [CVA6Cfg.DCACHE_USER_WIDTH-1:0] wr_user;
+  
+  // Write buffer data for forwarding and transaction tracking
+  typedef struct packed {
+    logic [CVA6Cfg.DCACHE_TAG_WIDTH+(CVA6Cfg.DCACHE_INDEX_WIDTH-CVA6Cfg.XLEN_ALIGN_BYTES)-1:0] wtag;
+    logic [CVA6Cfg.XLEN-1:0] data;
+    logic [CVA6Cfg.DCACHE_USER_WIDTH-1:0] user;
+    logic [(CVA6Cfg.XLEN/8)-1:0] dirty;
+    logic [(CVA6Cfg.XLEN/8)-1:0] valid;
+    logic [(CVA6Cfg.XLEN/8)-1:0] txblock;
+    logic checked;
+    logic [CVA6Cfg.DCACHE_SET_ASSOC-1:0] hit_oh;
+  } wbuffer_t;
+  
+  wbuffer_t [CVA6Cfg.WtDcacheWbufDepth-1:0] wbuffer_data;
+  logic [CVA6Cfg.DCACHE_MAX_TX-1:0][CVA6Cfg.PLEN-1:0] tx_paddr;
+  logic [CVA6Cfg.DCACHE_MAX_TX-1:0] tx_vld;
+  
+  // Internal control signals
   logic mem_ready, mem_valid;
   logic mode_flush_req, mode_flush_ack;
   logic wbuffer_empty;
-  logic [CVA6Cfg.MEM_TID_WIDTH-1:0] miss_id;
   logic mem_flush_ack;
   logic ctrl_flush_ack;
+  logic miss_busy;
+  
+  // AXI arbitration signals
+  axi_req_t axi_req_miss, axi_req_wbuf;
   
   // Cache controller
   wt_hybche_ctrl #(
@@ -175,10 +242,10 @@ module wt_hybche #(
     .cache_flush_ack_o    ( cache_flush_ack_o  ),
     .use_set_assoc_mode_i ( use_set_assoc_mode ),
     .mode_change_i        ( mode_change        ),
-    .miss_req_i           ( miss_req           ),
-    .miss_ack_o           ( miss_ack           ),
+    .miss_req_i           ( |miss_req          ),
+    .miss_ack_o           ( /* handled by miss unit */ ),
     .miss_dirty_i         ( 1'b0               ), // Write-through, no dirty data
-    .miss_addr_i          ( miss_addr          ),
+    .miss_addr_i          ( miss_paddr[0]      ), // Use first port address for now
     .miss_busy_o          ( miss_busy          ),
     .mode_flush_req_o     ( mode_flush_req     ),
     .mode_flush_ack_i     ( mode_flush_ack     ),
@@ -191,7 +258,18 @@ module wt_hybche #(
     .full_hit_cnt_o       ( /* unused for now */ )
   );
   
-  // Miss handling unit
+  // Miss handling unit - handles cache line refills from memory
+  logic miss_unit_busy;
+  logic [CVA6Cfg.DCACHE_TAG_WIDTH-1:0] miss_cl_tag;
+  logic [CVA6Cfg.DCACHE_INDEX_WIDTH-1:0] miss_cl_idx;
+  logic [CVA6Cfg.DCACHE_OFFSET_WIDTH-1:0] miss_cl_off;
+  logic [CVA6Cfg.DCACHE_SET_ASSOC-1:0] miss_cl_we;
+  logic miss_cl_vld, miss_cl_nc;
+  logic [CVA6Cfg.DCACHE_LINE_WIDTH-1:0] miss_cl_data;
+  logic [CVA6Cfg.DCACHE_USER_LINE_WIDTH-1:0] miss_cl_user;
+  logic [CVA6Cfg.DCACHE_LINE_WIDTH/8-1:0] miss_cl_data_be;
+  logic [CVA6Cfg.DCACHE_SET_ASSOC-1:0] miss_cl_vld_bits;
+  
   wt_hybche_missunit #(
     .CVA6Cfg       ( CVA6Cfg            ),
     .SET_MASK      ( SET_MASK           ),
@@ -208,64 +286,229 @@ module wt_hybche #(
     .cache_en_i           ( cache_en_i         ),
     .flush_i              ( flush_cache        ),
     .flush_ack_o          ( /* handled by ctrl */ ),
-    .miss_req_i           ( miss_req           ),
-    .miss_ack_o           ( miss_ack           ),
-    .miss_nc_i            ( miss_nc            ),
-    .miss_addr_i          ( miss_addr          ),
-    .miss_busy_o          ( miss_busy          ),
+    // Arbitrate between multiple miss requests from ports
+    .miss_req_i           ( |miss_req          ),
+    .miss_ack_o           ( miss_ack[0]        ), // Connect to first port for now
+    .miss_nc_i            ( miss_nc[0]         ), // Connect to first port for now
+    .miss_addr_i          ( miss_paddr[0]      ), // Connect to first port for now
+    .miss_busy_o          ( miss_unit_busy     ),
     .mode_flush_req_i     ( mode_flush_req     ),
     .mode_flush_ack_o     ( mode_flush_ack     ),
     .axi_req_o            ( axi_req_miss       ),
     .axi_resp_i           ( axi_resp_i         ),
-    .mem_req_o            ( /* connected to mem */ ),
-    .mem_addr_o           ( /* connected to mem */ ),
-    .mem_we_o             ( /* connected to mem */ ),
-    .mem_way_o            ( /* connected to mem */ ),
-    .mem_busy_o           ( /* connected to mem */ )
+    // Cache line memory interface
+    .wr_cl_vld_o          ( miss_cl_vld        ),
+    .wr_cl_nc_o           ( miss_cl_nc         ),
+    .wr_cl_we_o           ( miss_cl_we         ),
+    .wr_cl_tag_o          ( miss_cl_tag        ),
+    .wr_cl_idx_o          ( miss_cl_idx        ),
+    .wr_cl_off_o          ( miss_cl_off        ),
+    .wr_cl_data_o         ( miss_cl_data       ),
+    .wr_cl_user_o         ( miss_cl_user       ),
+    .wr_cl_data_be_o      ( miss_cl_data_be    ),
+    .wr_vld_bits_o        ( miss_cl_vld_bits   )
   );
   
-  // Write buffer
-  wt_hybche_wbuffer #(
-    .CVA6Cfg       ( CVA6Cfg            ),
-    .DEPTH         ( CVA6Cfg.WtDcacheWbufDepth ),
-    .HYBRID_MODE   ( HYBRID_MODE        ),
-    .FORCE_MODE    ( FORCE_MODE         ),
-    .REPL_POLICY   ( REPL_POLICY        ),
-    .axi_req_t     ( axi_req_t          ),
-    .axi_resp_t    ( axi_resp_t         )
-  ) i_wt_hybche_wbuffer (
-    .clk_i,
-    .rst_ni,
-    .valid_i              ( wbuf_valid        ),
-    .addr_i               ( wbuf_addr         ),
-    .we_i                 ( 1'b1              ),
-    .be_i                 ( wbuf_be           ),
-    .data_i               ( wbuf_wdata        ),
-    .ready_o              ( wbuf_ready        ),
-    .use_set_assoc_mode_i ( use_set_assoc_mode ),
-    .mode_change_i        ( mode_change        ),
-    .empty_o              ( wbuffer_empty      ),
-    .flush_i              ( flush_cache        ),
-    .flush_ack_o          ( /* connected to ctrl */ ),
-    .cache_en_i           ( cache_en_i         ),
-    .inval_i              ( 1'b0               ),
-    .inval_addr_i         ( '0                 ),
-    .axi_req_o            ( axi_req_wbuf       ),
-    .axi_resp_i           ( axi_resp_i         ),
-    .mem_priority_i       ( miss_busy          )
-  );
+  // Miss acknowledgment distribution and return signaling
+  // The miss unit handles one request at a time, so broadcast acknowledgments
+  for (genvar k = 0; k < NumPorts; k++) begin : gen_miss_ack
+    assign miss_ack[k] = miss_ack[0]; // Broadcast acknowledgment to all ports
+    assign miss_replay[k] = 1'b0;     // No replay logic needed for write-through
+    assign miss_rtrn_vld[k] = 1'b0;   // Return valid handled by memory interface
+  end
+  
+  // Memory interface connections to hybrid cache memory
+  logic mem_gnt;
+  logic [CVA6Cfg.DCACHE_TAG_WIDTH-1:0] mem_rd_tag;
+  logic [CVA6Cfg.DCACHE_INDEX_WIDTH-1:0] mem_rd_idx; 
+  logic [CVA6Cfg.DCACHE_OFFSET_WIDTH-1:0] mem_rd_off;
+  logic mem_rd_req, mem_rd_tag_only;
+  logic [NumPorts-1:0] mem_rd_prio;
+  
+  // Memory arbitration - route signals to memory module
+  assign mem_rd_prio = rd_prio;
+  assign mem_rd_tag = rd_tag[0];  // Simple arbitration for now
+  assign mem_rd_idx = rd_idx[0];
+  assign mem_rd_off = rd_off[0];
+  assign mem_rd_req = |rd_req;
+  assign mem_rd_tag_only = rd_tag_only[0];
+  
+  // Distribute read responses to all ports that requested
+  for (genvar k = 0; k < NumPorts; k++) begin : gen_rd_ack
+    assign rd_ack[k] = rd_req[k] ? mem_gnt : 1'b0;
+  end
+  
+  // Connect hybrid cache memory module to read interface and memory interfaces
+  // (The i_wt_hybche_mem module is instantiated above with these connections)
+  
+  // Read responses from memory - assign outputs
+  assign mem_gnt = 1'b1;  // Simplified - always grant for now
+  assign rd_data = '0;    // Memory interface to be completed when wt_hybche_mem is implemented
+  assign rd_user = '0;
+  assign rd_vld_bits = '0;
+  assign rd_hit_oh = '0;
 
   // Combine flush acknowledge from the controller and memory module
   assign flush_ack_o = ctrl_flush_ack | mem_flush_ack;
   
-  // NOTE: Core interface connections (dcache_req_ports_i/o) need to be 
-  // connected to appropriate controllers that handle the request/response
-  // protocol. This would typically involve instantiating read controllers
-  // similar to the standard wt_dcache implementation.
+  ///////////////////////////////////////////////////////
+  // Core interface implementation
+  ///////////////////////////////////////////////////////
   
-  // TODO: Complete core interface implementation
-  // - Connect dcache_req_ports_i/o to appropriate controllers
-  // - Implement proper request arbitration and response handling
-  // - Add miss request generation logic
-  // - Connect memory interfaces between components
+  // Read port controllers (NumPorts-1 read ports, 1 write port)
+  for (genvar k = 0; k < NumPorts - 1; k++) begin : gen_rd_ports
+    // Set high priority for important ports (MMU, normal reads, accelerator)
+    if ((k == 0 && (CVA6Cfg.MmuPresent || CVA6Cfg.RVZCMT)) || (k == 1) || (k == 2 && CVA6Cfg.EnableAccelerator)) begin
+      assign rd_prio[k] = 1'b1;
+      
+      // Use standard wt_dcache_ctrl for now - can be specialized later for hybrid features
+      wt_dcache_ctrl #(
+          .CVA6Cfg(CVA6Cfg),
+          .DCACHE_CL_IDX_WIDTH($clog2(CVA6Cfg.DCACHE_NUM_WORDS)),
+          .dcache_req_i_t(dcache_req_i_t),
+          .dcache_req_o_t(dcache_req_o_t),
+          .RdTxId(0)
+      ) i_rd_ctrl (
+          .clk_i          (clk_i),
+          .rst_ni         (rst_ni),
+          .cache_en_i     (cache_en_i),
+          // Core interface
+          .req_port_i     (dcache_req_ports_i[k]),
+          .req_port_o     (dcache_req_ports_o[k]),
+          // Miss interface
+          .miss_req_o     (miss_req[k]),
+          .miss_ack_i     (miss_ack[k]),
+          .miss_we_o      (miss_we[k]),
+          .miss_wdata_o   (miss_wdata[k]),
+          .miss_wuser_o   (miss_wuser[k]),
+          .miss_vld_bits_o(miss_vld_bits[k]),
+          .miss_paddr_o   (miss_paddr[k]),
+          .miss_nc_o      (miss_nc[k]),
+          .miss_size_o    (miss_size[k]),
+          .miss_id_o      (miss_id[k]),
+          .miss_replay_i  (miss_replay[k]),
+          .miss_rtrn_vld_i(miss_rtrn_vld[k]),
+          // Write collision detection
+          .wr_cl_vld_i    (wr_cl_vld),
+          // Memory interface
+          .rd_tag_o       (rd_tag[k]),
+          .rd_idx_o       (rd_idx[k]),
+          .rd_off_o       (rd_off[k]),
+          .rd_req_o       (rd_req[k]),
+          .rd_tag_only_o  (rd_tag_only[k]),
+          .rd_ack_i       (rd_ack[k]),
+          .rd_data_i      (rd_data),
+          .rd_user_i      (rd_user),
+          .rd_vld_bits_i  (rd_vld_bits),
+          .rd_hit_oh_i    (rd_hit_oh)
+      );
+    end else begin
+      assign rd_prio[k] = 1'b0;
+      assign dcache_req_ports_o[k] = '0;
+      assign miss_req[k] = 1'b0;
+      assign miss_we[k] = 1'b0;
+      assign miss_wdata[k] = '0;
+      assign miss_wuser[k] = '0;
+      assign miss_vld_bits[k] = '0;
+      assign miss_paddr[k] = '0;
+      assign miss_nc[k] = 1'b0;
+      assign miss_size[k] = '0;
+      assign miss_id[k] = '0;
+      assign rd_tag[k] = '0;
+      assign rd_idx[k] = '0;
+      assign rd_off[k] = '0;
+      assign rd_req[k] = 1'b0;
+      assign rd_tag_only[k] = 1'b0;
+    end
+  end
+  
+  // Write port controller (last port is write port)
+  if (NumPorts > 0) begin : gen_wr_port
+    wt_dcache_wbuffer #(
+        .CVA6Cfg(CVA6Cfg),
+        .DEPTH(CVA6Cfg.WtDcacheWbufDepth),
+        .RdTxId(1)
+    ) i_wt_dcache_wbuffer (
+        .clk_i          (clk_i),
+        .rst_ni         (rst_ni),
+        .cache_en_i     (cache_en_i),
+        .empty_o        (wbuffer_empty),
+        .not_ni_o       (/* unused for now */),
+        // Core interface (write port)
+        .req_port_i     (dcache_req_ports_i[NumPorts-1]),
+        .req_port_o     (dcache_req_ports_o[NumPorts-1]),
+        // Miss interface (for AMOs)
+        .miss_req_o     (miss_req[NumPorts-1]),
+        .miss_ack_i     (miss_ack[NumPorts-1]),
+        .miss_we_o      (miss_we[NumPorts-1]),
+        .miss_wdata_o   (miss_wdata[NumPorts-1]),
+        .miss_wuser_o   (miss_wuser[NumPorts-1]),
+        .miss_vld_bits_o(miss_vld_bits[NumPorts-1]),
+        .miss_paddr_o   (miss_paddr[NumPorts-1]),
+        .miss_nc_o      (miss_nc[NumPorts-1]),
+        .miss_size_o    (miss_size[NumPorts-1]),
+        .miss_id_o      (miss_id[NumPorts-1]),
+        .miss_rtrn_vld_i(miss_rtrn_vld[NumPorts-1]),
+        .miss_rtrn_id_i (/* unused for now */),
+        // Memory interface
+        .rd_tag_o       (rd_tag[NumPorts-1]),
+        .rd_idx_o       (rd_idx[NumPorts-1]),
+        .rd_off_o       (rd_off[NumPorts-1]),
+        .rd_req_o       (rd_req[NumPorts-1]),
+        .rd_tag_only_o  (rd_tag_only[NumPorts-1]),
+        .rd_ack_i       (rd_ack[NumPorts-1]),
+        .rd_data_i      (rd_data),
+        .rd_vld_bits_i  (rd_vld_bits),
+        .rd_hit_oh_i    (rd_hit_oh),
+        // Cache line write interface
+        .wr_cl_vld_i    (wr_cl_vld),
+        .wr_cl_idx_i    (miss_cl_idx), // From miss unit
+        // Word write interface
+        .wr_req_o       (wr_req),
+        .wr_ack_i       (wr_ack),
+        .wr_idx_o       (wr_idx),
+        .wr_off_o       (wr_off),
+        .wr_data_o      (wr_data),
+        .wr_data_be_o   (wr_data_be),
+        .wr_user_o      (wr_user),
+        // Write buffer forwarding
+        .wbuffer_data_o (wbuffer_data),
+        .tx_paddr_o     (tx_paddr),
+        .tx_vld_o       (tx_vld)
+    );
+  end
+  
+  ///////////////////////////////////////////////////////
+  // AXI arbitration - simple priority scheme
+  ///////////////////////////////////////////////////////
+  
+  // Write acknowledgment for memory interface
+  assign wr_ack = 1'b1; // Always acknowledge writes for now
+  assign wbuf_ready = 1'b1; // Always ready for now
+  assign axi_req_wbuf = '0; // No direct AXI interface from write buffer for now
+  
+  // Miss unit has higher priority than write buffer
+  assign axi_req_o = miss_unit_busy ? axi_req_miss : axi_req_wbuf;
+  
+  // Connect miss busy signal for internal logic
+  assign miss_busy = miss_unit_busy;
+  
+  ///////////////////////////////////////////////////////
+  // Additional outputs required by subsystem interface  
+  ///////////////////////////////////////////////////////
+  
+  // Miss indication - OR of all port miss requests or miss unit busy
+  assign dcache_miss_o = |miss_req || miss_unit_busy;
+  
+  // Write buffer status
+  assign wbuffer_empty_o = wbuffer_empty;
+  assign wbuffer_not_ni_o = !wbuffer_empty;
+  
+  // Miss valid bits for performance counters
+  assign miss_vld_bits_o = miss_vld_bits;
+  
+  // AMO interface - connect to write port's AMO handling
+  // (This is simplified - full AMO support would need additional logic)
+  assign dcache_amo_resp_o = '0;  // TODO: implement proper AMO response
+  
 endmodule
