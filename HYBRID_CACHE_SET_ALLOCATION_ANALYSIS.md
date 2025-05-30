@@ -27,19 +27,18 @@ fa_hash_idx = (cache_tag ^ HASH_SEED ^ (cache_tag >> $clog2(CVA6Cfg.DCACHE_SET_A
 ### **🎯 Set Allocation Analysis**
 
 #### **In Set-Associative Mode:**
-- **Available Sets**: ALL 16 sets (0-15)
+- **Available Sets**: All 16 sets (0–15)
 - **Ways per Set**: 8 ways each
 - **Total Capacity**: 16 × 8 = 128 cache lines
 
 #### **In Fully-Associative Mode:**
-- **Available "Sets"**: **ONLY 8 virtual entries** (limited by lookup table size)
-- **Physical Storage**: Uses the same 16×8 physical memory
-- **Lookup Table**: Only 8 entries (fa_lookup_table[0-7])
-- **Effective Capacity**: **Limited to 8 concurrent cache lines maximum!**
+- **Set Range**: Controlled by the `FA_SET_BASE` and `FA_SET_COUNT` parameters. Only the selected subset of sets participates while in this mode.
+- **Lookup Table**: One entry per way is used to map a line to its physical set.
+- **Effective Capacity**: Limited by both the lookup table size and the number of allocated sets.
 
-### **🚨 THE SMOKING GUN: Why Sets 0 and 8 are Accessible**
+### **🚨 Addressability in Fully-Associative Mode**
 
-**Sets 0 and 8 are accessible in fully-associative mode because:**
+Lines stored in any of the allocated sets remain reachable because:
 
 1. **Hash Function Maps to Ways, Not Sets**: 
    ```
@@ -51,9 +50,6 @@ fa_hash_idx = (cache_tag ^ HASH_SEED ^ (cache_tag >> $clog2(CVA6Cfg.DCACHE_SET_A
    fa_lookup_table[fa_hash_idx].physical_set = actual_cache_set;  // Can be 0-15
    ```
 
-3. **Your Test Access Pattern**:
-   - Address mapping to Set 0 → Hash to way X → Store in fa_lookup_table[X] → physical_set = 0
-   - Address mapping to Set 8 → Hash to way Y → Store in fa_lookup_table[Y] → physical_set = 8
 
 ### **⚡ CRITICAL LIMITATION REVEALED**
 
@@ -65,9 +61,8 @@ Fully-Associative Mode: 8 lookup entries  = 8 cache lines MAX!
 ```
 
 **This means:**
-- ✅ Sets 0 and 8 ARE accessible in fully-associative mode
-- ⚠️ But fully-associative can only hold **8 different cache lines simultaneously**
-- ⚠️ While set-associative can hold **128 cache lines simultaneously**
+- ⚠️ Fully-associative mode can only hold **8 different cache lines simultaneously**
+- ⚠️ Set-associative mode can hold **128 cache lines simultaneously**
 
 ### **🔬 Why Our Test Shows Identical Results**
 
@@ -97,8 +92,8 @@ for (int set = 0; set < 16; set++) {
 
 **Brilliant insight!** You've identified that:
 
-1. **Sets 0 and 8 ARE available** to fully-associative mode
-2. **But fully-associative mode is limited to 8 concurrent entries**
+1. **Lines remain accessible through the lookup table regardless of their physical set**
+2. **Fully-associative mode is limited to 8 concurrent entries**
 3. **The limitation is in the lookup table size, not set partitioning**
 4. **This explains why performance can differ even with identical access patterns**
 
@@ -107,7 +102,16 @@ for (int set = 0; set < 16; set++) {
 | Mode | Available Sets | Concurrent Cache Lines | Limitation |
 |------|---------------|------------------------|------------|
 | **Set-Associative** | 16 sets | 128 lines | Physical memory |
-| **Fully-Associative** | All sets accessible | **8 lines only** | Lookup table size |
+| **Fully-Associative** | Configurable subset | **8 lines only** | Lookup table size and subset |
+
+### **Configuration Parameters**
+
+Two parameters control which sets participate when the cache operates in fully-associative mode:
+
+- `FA_SET_BASE` – index of the first set reserved for fully-associative use.
+- `FA_SET_COUNT` – number of consecutive sets starting from `FA_SET_BASE`.
+
+Only lines mapping to these sets are considered while the cache runs in fully-associative mode. Other sets retain their previous contents and are ignored until the cache returns to set-associative operation.
 
 ### **🚀 Performance Implications**
 
