@@ -149,6 +149,8 @@ package cva6_config_pkg;
       DcacheByteSize: unsigned'(CVA6ConfigDcacheByteSize),
       DcacheSetAssoc: unsigned'(CVA6ConfigDcacheSetAssoc),
       DcacheLineWidth: unsigned'(CVA6ConfigDcacheLineWidth),
+      DcacheFaBaseSet: unsigned'(0),
+      DcacheFaSetCount: unsigned'(2 ** ($clog2(CVA6ConfigDcacheByteSize / CVA6ConfigDcacheSetAssoc) - $clog2(CVA6ConfigDcacheLineWidth / 8))),
       DcacheFlushOnFence: unsigned'(CVA6ConfigDcacheFlushOnFence),
       DcacheInvalidateOnFlush: unsigned'(CVA6ConfigDcacheInvalidateOnFlush),
       DataUserEn: unsigned'(CVA6ConfigDataUserEn),

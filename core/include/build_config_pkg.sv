@@ -144,6 +144,8 @@ package build_config_pkg;
     cfg.DCACHE_INDEX_WIDTH = DCACHE_INDEX_WIDTH;
     cfg.DCACHE_TAG_WIDTH = cfg.PLEN - DCACHE_INDEX_WIDTH;
     cfg.DCACHE_LINE_WIDTH = CVA6Cfg.DcacheLineWidth;
+    cfg.DCACHE_FA_BASE_SET = CVA6Cfg.DcacheFaBaseSet;
+    cfg.DCACHE_FA_SET_COUNT = CVA6Cfg.DcacheFaSetCount;
     cfg.DCACHE_USER_LINE_WIDTH = (CVA6Cfg.AxiUserWidth == 1) ? 4 : CVA6Cfg.DcacheLineWidth;
     cfg.DCACHE_USER_WIDTH = CVA6Cfg.AxiUserWidth;
     cfg.DCACHE_OFFSET_WIDTH = DCACHE_OFFSET_WIDTH;

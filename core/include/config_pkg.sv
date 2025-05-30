@@ -187,6 +187,10 @@ package config_pkg;
     int unsigned                 DcacheSetAssoc;
     // Data cache line width
     int unsigned                 DcacheLineWidth;
+    // Base set index for fully associative allocation
+    int unsigned                 DcacheFaBaseSet;
+    // Number of sets using fully associative allocation
+    int unsigned                 DcacheFaSetCount;
     // Data cache flush on fence
     bit                          DcacheFlushOnFence;
     // Data cache invalidate on flush
@@ -358,6 +362,8 @@ package config_pkg;
     int unsigned DCACHE_INDEX_WIDTH;
     int unsigned DCACHE_TAG_WIDTH;
     int unsigned DCACHE_LINE_WIDTH;
+    int unsigned DCACHE_FA_BASE_SET;
+    int unsigned DCACHE_FA_SET_COUNT;
     int unsigned DCACHE_USER_LINE_WIDTH;
     int unsigned DCACHE_USER_WIDTH;
     int unsigned DCACHE_OFFSET_WIDTH;
