@@ -125,6 +125,7 @@ module wt_hybche_mem #(
   localparam int unsigned DCACHE_CL_IDX_WIDTH = $clog2(CVA6Cfg.DCACHE_NUM_WORDS);
   logic flushing_q, flushing_d;
   logic [DCACHE_CL_IDX_WIDTH-1:0] flush_cnt_q, flush_cnt_d;
+  logic [DCACHE_CL_IDX_WIDTH-1:0] flush_limit;
   logic flush_ack_d, flush_ack_q;
   logic flush_done;
   
@@ -403,7 +404,19 @@ module wt_hybche_mem #(
   ///////////////////////////////
   // Flush control
   ///////////////////////////////
-  assign flush_done = (flush_cnt_q == CVA6Cfg.DCACHE_NUM_WORDS - 1) && flushing_q;
+  always_comb begin
+    // Default flush limit is the full number of cache sets
+    flush_limit = CVA6Cfg.DCACHE_NUM_WORDS[DCACHE_CL_IDX_WIDTH-1:0];
+
+    // When retaining data across mode switches, only iterate over the
+    // fully associative subset of entries.
+    if (HYBRID_MODE && (REPL_POLICY == wt_hybrid_cache_pkg::REPL_POLICY_RETAIN) &&
+        !use_set_assoc_mode_i) begin
+      flush_limit = CVA6Cfg.DCACHE_SET_ASSOC[DCACHE_CL_IDX_WIDTH-1:0];
+    end
+  end
+
+  assign flush_done = (flush_cnt_q == flush_limit - 1) && flushing_q;
 
   always_comb begin
     // default assignments
