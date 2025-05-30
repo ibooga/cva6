@@ -91,8 +91,8 @@ module wt_hybche #(
       case(FORCE_MODE)
         wt_hybrid_cache_pkg::FORCE_MODE_DYNAMIC: begin
           // Dynamic mode - switch based on privilege level
-          // M-mode (3) uses set associative, S-mode (1) and U-mode (0) use fully associative
-          use_set_assoc_mode = (priv_lvl_i == 2'b11); // Machine mode
+          // M-mode (3) uses fully associative, S-mode (1) and U-mode (0) use set associative
+          use_set_assoc_mode = (priv_lvl_i != 2'b11); // NOT Machine mode
         end
         wt_hybrid_cache_pkg::FORCE_MODE_SET_ASS: begin
           // Force set associative mode (like standard WT cache)
@@ -327,6 +327,12 @@ module wt_hybche #(
     .mode_flush_ack_o     ( mode_flush_ack     ),
     .axi_req_o            ( axi_req_miss       ),
     .axi_resp_i           ( axi_resp_i         ),
+    // Memory interface for cache memory access (internal signals)
+    .mem_req_o            ( /* unused */       ),
+    .mem_addr_o           ( /* unused */       ),
+    .mem_we_o             ( /* unused */       ),
+    .mem_way_o            ( /* unused */       ),
+    .mem_busy_o           ( /* unused */       ),
     // Cache line memory interface
     .wr_cl_vld_o          ( miss_cl_vld        ),
     .wr_cl_nc_o           ( miss_cl_nc         ),
