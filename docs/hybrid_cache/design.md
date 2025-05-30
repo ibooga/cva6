@@ -34,6 +34,17 @@ the hashed index calculation. Switching back rebuilds the set associative view
 by writing each cached line to its physical set. Only the minimal number of
 lines are moved; unused entries remain invalid.
 
+### Set Allocation in Fully Associative Mode
+Fully associative operation does not automatically use all cache sets.  Instead,
+two configuration parameters select a contiguous subset of sets:
+
+- `FA_SET_BASE` – index of the first set reserved for fully-associative access.
+- `FA_SET_COUNT` – number of sets starting from `FA_SET_BASE`.
+
+Only these sets participate while the cache is in fully associative mode.  The
+contents of all other sets remain untouched until set associative operation is
+restored.
+
 ## Usage
 Set the `DCacheType` parameter in the configuration package to one of the modes
 above. The analysis utilities found in this repository can be used to benchmark
