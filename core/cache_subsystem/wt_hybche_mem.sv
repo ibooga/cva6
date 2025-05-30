@@ -125,6 +125,7 @@ module wt_hybche_mem #(
   localparam int unsigned DCACHE_CL_IDX_WIDTH = $clog2(CVA6Cfg.DCACHE_NUM_WORDS);
   logic flushing_q, flushing_d;
   logic [DCACHE_CL_IDX_WIDTH-1:0] flush_cnt_q, flush_cnt_d;
+  logic [DCACHE_CL_IDX_WIDTH-1:0] flush_limit;
   logic flush_ack_d, flush_ack_q;
   logic flush_done;
   
@@ -138,7 +139,8 @@ module wt_hybche_mem #(
   // implementation assumes all ports access the same set at a time.
   always_comb begin
     set_assoc_index = rd_idx_i[0];
-    full_assoc_index = (rd_tag_i[0] ^ HASH_SEED ^ (rd_tag_i[0] >> $clog2(CVA6Cfg.DCACHE_SET_ASSOC))) & (CVA6Cfg.DCACHE_NUM_WORDS-1);
+    full_assoc_index = ((rd_tag_i[0] ^ HASH_SEED ^ (rd_tag_i[0] >> $clog2(CVA6Cfg.DCACHE_SET_ASSOC))) % DCACHE_FA_SET_COUNT)
+                       + DCACHE_FA_BASE_SET;
     set_assoc_tag = rd_tag_i[0];
     full_assoc_tag = {rd_idx_i[0], rd_tag_i[0]};
   end
@@ -364,7 +366,8 @@ module wt_hybche_mem #(
           logic [CVA6Cfg.DCACHE_INDEX_WIDTH-1:0] wr_index;
           logic [CVA6Cfg.DCACHE_TAG_WIDTH-1:0]   wr_tag;
           wr_index = use_set_assoc_mode_i ? wr_cl_idx_i :
-                      (wr_cl_tag_i ^ HASH_SEED ^ (wr_cl_tag_i >> $clog2(CVA6Cfg.DCACHE_SET_ASSOC))) & (CVA6Cfg.DCACHE_NUM_WORDS-1);
+                      ((wr_cl_tag_i ^ HASH_SEED ^ (wr_cl_tag_i >> $clog2(CVA6Cfg.DCACHE_SET_ASSOC))) % DCACHE_FA_SET_COUNT)
+                      + DCACHE_FA_BASE_SET;
           wr_tag   = use_set_assoc_mode_i ? wr_cl_tag_i : {wr_cl_idx_i, wr_cl_tag_i};
           for (int way = 0; way < CVA6Cfg.DCACHE_SET_ASSOC; way++) begin
             if (wr_cl_we_i[way]) begin
@@ -385,7 +388,8 @@ module wt_hybche_mem #(
         if (|wr_req_i) begin
           logic [CVA6Cfg.DCACHE_INDEX_WIDTH-1:0] widx;
           widx = use_set_assoc_mode_i ? wr_idx_i :
-                  (wr_idx_i ^ HASH_SEED ^ (wr_idx_i >> $clog2(CVA6Cfg.DCACHE_SET_ASSOC))) & (CVA6Cfg.DCACHE_NUM_WORDS-1);
+                  ((wr_idx_i ^ HASH_SEED ^ (wr_idx_i >> $clog2(CVA6Cfg.DCACHE_SET_ASSOC))) % DCACHE_FA_SET_COUNT)
+                  + DCACHE_FA_BASE_SET;
           for (int way = 0; way < CVA6Cfg.DCACHE_SET_ASSOC; way++) begin
             if (wr_req_i[way]) begin
               data_mem[widx][way][CVA6Cfg.XLEN-1:0] <= wr_data_i;
@@ -403,7 +407,21 @@ module wt_hybche_mem #(
   ///////////////////////////////
   // Flush control
   ///////////////////////////////
-  assign flush_done = (flush_cnt_q == CVA6Cfg.DCACHE_NUM_WORDS - 1) && flushing_q;
+
+  always_comb begin
+    // Default flush limit is the full number of cache sets
+    flush_limit = CVA6Cfg.DCACHE_NUM_WORDS[DCACHE_CL_IDX_WIDTH-1:0];
+
+    // When retaining data across mode switches, only iterate over the
+    // fully associative subset of entries.
+    if (HYBRID_MODE && (REPL_POLICY == wt_hybrid_cache_pkg::REPL_POLICY_RETAIN) &&
+        !use_set_assoc_mode_i) begin
+      flush_limit = CVA6Cfg.DCACHE_SET_ASSOC[DCACHE_CL_IDX_WIDTH-1:0];
+    end
+  end
+
+  assign flush_done = (flush_cnt_q == flush_limit - 1) && flushing_q;
+
 
   always_comb begin
     // default assignments
@@ -421,7 +439,7 @@ module wt_hybche_mem #(
     // start flush when requested and not already flushing
     if (flush_i && !flushing_q) begin
       flushing_d  = 1'b1;
-      flush_cnt_d = '0;
+      flush_cnt_d = use_set_assoc_mode_i ? '0 : DCACHE_FA_BASE_SET;
     end
 
     // handle ongoing flush

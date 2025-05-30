@@ -81,12 +81,13 @@ module wt_hybche_missunit #(
   logic                   axi_wr_req, axi_wr_gnt;
   logic                   axi_rd_valid;
   logic [CVA6Cfg.DCACHE_LINE_WIDTH-1:0] axi_rd_data;
-  
+
   // Mode change handling signals
   logic                   in_mode_transition;
   logic [CVA6Cfg.DCACHE_SET_ASSOC-1:0] flush_ways;
   logic [CVA6Cfg.DCACHE_INDEX_WIDTH-1:0] flush_index;
   logic                   flush_done;
+  logic [CVA6Cfg.DCACHE_SET_ASSOC_WIDTH-1:0] flush_cnt_q, flush_cnt_d;
   
   // Set in_mode_transition flag during mode transitions
   assign in_mode_transition = mode_change_i && HYBRID_MODE && 
@@ -107,6 +108,10 @@ module wt_hybche_missunit #(
     miss_ack_o = 1'b0;
     flush_ack_o = 1'b0;
     mode_flush_ack_o = 1'b0;
+    flush_cnt_d = flush_cnt_q;
+    flush_index = flush_cnt_q;
+    flush_ways  = 1 << flush_cnt_q;
+    flush_done  = (flush_cnt_q == CVA6Cfg.DCACHE_SET_ASSOC - 1);
     
     mem_req_o = 1'b0;
     mem_addr_o = miss_addr_q;
@@ -123,10 +128,11 @@ module wt_hybche_missunit #(
         miss_busy_o = 1'b0;
         
         // Handle mode flush request with RETAIN policy
-        if (mode_flush_req_i && HYBRID_MODE && 
+        if (mode_flush_req_i && HYBRID_MODE &&
             (REPL_POLICY == wt_hybrid_cache_pkg::REPL_POLICY_RETAIN)) begin
           state_d = MODE_FLUSH;
           miss_busy_o = 1'b1;
+          flush_cnt_d = '0;
         end
         // Handle regular miss
         else if (miss_req_i && cache_en_i) begin
@@ -143,31 +149,26 @@ module wt_hybche_missunit #(
       
       MODE_FLUSH: begin
         // In mode transition with RETAIN policy
-        // Selective flush based on mode transition
         miss_busy_o = 1'b1;
         mem_busy_o = 1'b1;
-        
+        mem_req_o   = 1'b1;
+        flush_index = flush_cnt_q;
+        flush_ways  = 1 << flush_cnt_q;
+        flush_cnt_d = flush_cnt_q + 1'b1;
+
         if (use_set_assoc_mode_i) begin
           // Switching TO set associative FROM fully associative
-          // Reorganize cache entries based on index bits
-          mem_req_o = 1'b1;
           mem_we_o = 1'b1;
-          
-          // Acknowledge mode flush when done
-          if (flush_done) begin
-            mode_flush_ack_o = 1'b1;
-            state_d = IDLE;
-          end
         end else begin
           // Switching TO fully associative FROM set associative
-          // Update lookup table with current cache contents
-          mem_req_o = 1'b1;
-          
-          // Acknowledge mode flush when done
-          if (flush_done) begin
-            mode_flush_ack_o = 1'b1;
-            state_d = IDLE;
-          end
+          mem_we_o = 1'b0;
+        end
+
+        // Acknowledge mode flush when done
+        if (flush_done) begin
+          mode_flush_ack_o = 1'b1;
+          state_d = IDLE;
+          flush_cnt_d = '0;
         end
       end
       
@@ -236,10 +237,12 @@ module wt_hybche_missunit #(
       miss_addr_q <= '0;
       miss_nc_q <= 1'b0;
       busy_q <= 1'b0;
+      flush_cnt_q <= '0;
     end else begin
       state_q <= state_d;
       busy_q <= miss_busy_o;
-      
+      flush_cnt_q <= flush_cnt_d;
+
       if (miss_req_i && state_q == IDLE) begin
         miss_addr_q <= miss_addr_i;
         miss_nc_q <= miss_nc_i;
