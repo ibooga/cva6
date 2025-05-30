@@ -140,7 +140,9 @@ module wt_hybche #(
     .FORCE_MODE    ( FORCE_MODE         ),
     .REPL_POLICY   ( REPL_POLICY        ),
     .REPL_ALGO     ( REPL_ALGO          ),
-    .HASH_SEED     ( HASH_SEED          )
+    .HASH_SEED     ( HASH_SEED          ),
+    .NumPorts      ( NumPorts           ),
+    .wbuffer_t     ( wbuffer_t          )
   ) i_wt_hybche_mem (
     .clk_i,
     .rst_ni,
@@ -153,7 +155,36 @@ module wt_hybche #(
     .sram_idx_o,
     .sram_tag_o,
     .sram_data_o,
-    .sram_data_i
+    .sram_data_i,
+    .rd_tag_i             ( rd_tag ),
+    .rd_idx_i             ( rd_idx ),
+    .rd_off_i             ( rd_off ),
+    .rd_req_i             ( rd_req ),
+    .rd_tag_only_i        ( rd_tag_only ),
+    .rd_prio_i            ( rd_prio ),
+    .rd_ack_o             ( rd_ack ),
+    .rd_vld_bits_o        ( rd_vld_bits ),
+    .rd_hit_oh_o          ( rd_hit_oh ),
+    .rd_data_o            ( rd_data ),
+    .rd_user_o            ( rd_user ),
+    .wr_cl_vld_i          ( miss_cl_vld ),
+    .wr_cl_nc_i           ( miss_cl_nc ),
+    .wr_cl_we_i           ( miss_cl_we ),
+    .wr_cl_tag_i          ( miss_cl_tag ),
+    .wr_cl_idx_i          ( miss_cl_idx ),
+    .wr_cl_off_i          ( miss_cl_off ),
+    .wr_cl_data_i         ( miss_cl_data ),
+    .wr_cl_user_i         ( miss_cl_user ),
+    .wr_cl_data_be_i      ( miss_cl_data_be ),
+    .wr_vld_bits_i        ( miss_cl_vld_bits ),
+    .wr_req_i             ( wr_req ),
+    .wr_ack_o             ( wr_ack ),
+    .wr_idx_i             ( wr_idx ),
+    .wr_off_i             ( wr_off ),
+    .wr_data_i            ( wr_data ),
+    .wr_user_i            ( wr_user ),
+    .wr_data_be_i         ( wr_data_be ),
+    .wbuffer_data_i       ( wbuffer_data )
   );
   
   // Additional internal signals needed for component interconnection
@@ -332,6 +363,8 @@ module wt_hybche #(
   assign mem_rd_off = rd_off[0];
   assign mem_rd_req = |rd_req;
   assign mem_rd_tag_only = rd_tag_only[0];
+
+  assign mem_gnt = 1'b1;
   
   // Distribute read responses to all ports that requested
   for (genvar k = 0; k < NumPorts; k++) begin : gen_rd_ack
@@ -341,12 +374,7 @@ module wt_hybche #(
   // Connect hybrid cache memory module to read interface and memory interfaces
   // (The i_wt_hybche_mem module is instantiated above with these connections)
   
-  // Read responses from memory - assign outputs
-  assign mem_gnt = 1'b1;  // Simplified - always grant for now
-  assign rd_data = '0;    // Memory interface to be completed when wt_hybche_mem is implemented
-  assign rd_user = '0;
-  assign rd_vld_bits = '0;
-  assign rd_hit_oh = '0;
+  // Read responses are provided by the memory module
 
   // Combine flush acknowledge from the controller and memory module
   assign flush_ack_o = ctrl_flush_ack | mem_flush_ack;
@@ -482,8 +510,7 @@ module wt_hybche #(
   // AXI arbitration - simple priority scheme
   ///////////////////////////////////////////////////////
   
-  // Write acknowledgment for memory interface
-  assign wr_ack = 1'b1; // Always acknowledge writes for now
+  // Write acknowledgment for memory interface comes from the memory
   assign wbuf_ready = 1'b1; // Always ready for now
   assign axi_req_wbuf = '0; // No direct AXI interface from write buffer for now
   

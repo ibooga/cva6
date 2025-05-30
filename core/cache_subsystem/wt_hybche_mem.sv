@@ -28,7 +28,11 @@ module wt_hybche_mem #(
   parameter wt_hybrid_cache_pkg::replacement_algo_e   REPL_ALGO   = wt_hybrid_cache_pkg::REPL_ALGO_RR,
   // Seed for the hash function used in fully associative mode.  Different seeds
   // reduce deterministic collisions and can be overridden per instance.
-  parameter logic [CVA6Cfg.DCACHE_TAG_WIDTH-1:0] HASH_SEED = wt_hybrid_cache_pkg::DEFAULT_HASH_SEED[CVA6Cfg.DCACHE_TAG_WIDTH-1:0]
+  parameter logic [CVA6Cfg.DCACHE_TAG_WIDTH-1:0] HASH_SEED = wt_hybrid_cache_pkg::DEFAULT_HASH_SEED[CVA6Cfg.DCACHE_TAG_WIDTH-1:0],
+  // Number of memory ports and write buffer type (for compatibility with the
+  // standard write-through cache memory implementation)
+  parameter int unsigned                          NumPorts  = 1,
+  parameter type                                  wbuffer_t = logic
 ) (
   input  logic                           clk_i,
   input  logic                           rst_ni,
@@ -57,7 +61,44 @@ module wt_hybche_mem #(
   // flush this bus carries the invalidation value, otherwise it forwards the
   // data returned by the memory arrays.
   output logic [CVA6Cfg.DCACHE_LINE_WIDTH-1:0]   sram_data_o,
-  input  logic [CVA6Cfg.DCACHE_LINE_WIDTH-1:0]   sram_data_i
+  input  logic [CVA6Cfg.DCACHE_LINE_WIDTH-1:0]   sram_data_i,
+
+  // Read ports
+  input  logic [NumPorts-1:0][CVA6Cfg.DCACHE_TAG_WIDTH-1:0]       rd_tag_i,
+  input  logic [NumPorts-1:0][DCACHE_CL_IDX_WIDTH-1:0]            rd_idx_i,
+  input  logic [NumPorts-1:0][CVA6Cfg.DCACHE_OFFSET_WIDTH-1:0]    rd_off_i,
+  input  logic [NumPorts-1:0]                                     rd_req_i,
+  input  logic [NumPorts-1:0]                                     rd_tag_only_i,
+  input  logic [NumPorts-1:0]                                     rd_prio_i,
+  output logic [NumPorts-1:0]                                    rd_ack_o,
+  output logic [CVA6Cfg.DCACHE_SET_ASSOC-1:0]                     rd_vld_bits_o,
+  output logic [CVA6Cfg.DCACHE_SET_ASSOC-1:0]                     rd_hit_oh_o,
+  output logic [CVA6Cfg.XLEN-1:0]                                 rd_data_o,
+  output logic [CVA6Cfg.DCACHE_USER_WIDTH-1:0]                    rd_user_o,
+
+  // Cache line write port
+  input  logic                                                    wr_cl_vld_i,
+  input  logic                                                    wr_cl_nc_i,
+  input  logic [CVA6Cfg.DCACHE_SET_ASSOC-1:0]                     wr_cl_we_i,
+  input  logic [CVA6Cfg.DCACHE_TAG_WIDTH-1:0]                     wr_cl_tag_i,
+  input  logic [DCACHE_CL_IDX_WIDTH-1:0]                          wr_cl_idx_i,
+  input  logic [CVA6Cfg.DCACHE_OFFSET_WIDTH-1:0]                  wr_cl_off_i,
+  input  logic [CVA6Cfg.DCACHE_LINE_WIDTH-1:0]                    wr_cl_data_i,
+  input  logic [CVA6Cfg.DCACHE_USER_LINE_WIDTH-1:0]               wr_cl_user_i,
+  input  logic [CVA6Cfg.DCACHE_LINE_WIDTH/8-1:0]                  wr_cl_data_be_i,
+  input  logic [CVA6Cfg.DCACHE_SET_ASSOC-1:0]                     wr_vld_bits_i,
+
+  // Single word write port
+  input  logic [CVA6Cfg.DCACHE_SET_ASSOC-1:0]                     wr_req_i,
+  output logic                                                    wr_ack_o,
+  input  logic [DCACHE_CL_IDX_WIDTH-1:0]                          wr_idx_i,
+  input  logic [CVA6Cfg.DCACHE_OFFSET_WIDTH-1:0]                  wr_off_i,
+  input  logic [CVA6Cfg.XLEN-1:0]                                 wr_data_i,
+  input  logic [CVA6Cfg.DCACHE_USER_WIDTH-1:0]                    wr_user_i,
+  input  logic [(CVA6Cfg.XLEN/8)-1:0]                             wr_data_be_i,
+
+  // Forwarded write buffer contents for hazard checking
+  input  wbuffer_t [CVA6Cfg.WtDcacheWbufDepth-1:0]                wbuffer_data_i
 );
 
   ///////////////////////////////////////////////////////
@@ -69,6 +110,16 @@ module wt_hybche_mem #(
   logic [CVA6Cfg.DCACHE_SET_ASSOC-1:0] way_hit;           // Hit per way
   logic [CVA6Cfg.DCACHE_SET_ASSOC-1:0] repl_way;          // Way to replace
   logic [CVA6Cfg.DCACHE_TAG_WIDTH-1:0] tag_rdata [CVA6Cfg.DCACHE_SET_ASSOC-1:0]; // Tag read data
+
+  // Simple memory arrays for data, user bits and tags
+  logic [CVA6Cfg.DCACHE_LINE_WIDTH-1:0]
+       data_mem   [CVA6Cfg.DCACHE_NUM_WORDS-1:0][CVA6Cfg.DCACHE_SET_ASSOC-1:0];
+  logic [CVA6Cfg.DCACHE_USER_LINE_WIDTH-1:0]
+       user_mem   [CVA6Cfg.DCACHE_NUM_WORDS-1:0][CVA6Cfg.DCACHE_SET_ASSOC-1:0];
+  logic [CVA6Cfg.DCACHE_TAG_WIDTH-1:0]
+       tag_mem    [CVA6Cfg.DCACHE_NUM_WORDS-1:0][CVA6Cfg.DCACHE_SET_ASSOC-1:0];
+  logic [CVA6Cfg.DCACHE_SET_ASSOC-1:0]
+       valid_mem  [CVA6Cfg.DCACHE_NUM_WORDS-1:0];
   
   // Flush state
   localparam int unsigned DCACHE_CL_IDX_WIDTH = $clog2(CVA6Cfg.DCACHE_NUM_WORDS);
@@ -82,10 +133,27 @@ module wt_hybche_mem #(
   logic [CVA6Cfg.DCACHE_INDEX_WIDTH-1:0] full_assoc_index; // Index for fully associative mode
   logic [CVA6Cfg.DCACHE_TAG_WIDTH-1:0] set_assoc_tag;    // Tag for set associative mode
   logic [CVA6Cfg.DCACHE_TAG_WIDTH-1:0] full_assoc_tag;   // Tag for fully associative mode (includes index bits)
+
+  // Derive tag and index from the first read port.  This simplified
+  // implementation assumes all ports access the same set at a time.
+  always_comb begin
+    set_assoc_index = rd_idx_i[0];
+    full_assoc_index = (rd_tag_i[0] ^ HASH_SEED ^ (rd_tag_i[0] >> $clog2(CVA6Cfg.DCACHE_SET_ASSOC))) & (CVA6Cfg.DCACHE_NUM_WORDS-1);
+    set_assoc_tag = rd_tag_i[0];
+    full_assoc_tag = {rd_idx_i[0], rd_tag_i[0]};
+  end
   
   // Mode selection muxes
   logic [CVA6Cfg.DCACHE_INDEX_WIDTH-1:0] cache_index;
   logic [CVA6Cfg.DCACHE_TAG_WIDTH-1:0] cache_tag;
+
+  // Read currently addressed set from memory arrays
+  always_comb begin
+    for (int way = 0; way < CVA6Cfg.DCACHE_SET_ASSOC; way++) begin
+      tag_rdata[way] = tag_mem[cache_index][way];
+      way_valid[way] = valid_mem[cache_index][way];
+    end
+  end
   
   // Flattened signals for memory operations
   logic [CVA6Cfg.DCACHE_TAG_WIDTH*CVA6Cfg.DCACHE_SET_ASSOC-1:0] tags_flattened;
@@ -176,6 +244,22 @@ module wt_hybche_mem #(
       end
     end
   end
+
+  // Generate read outputs
+  always_comb begin
+    rd_ack_o      = rd_req_i;
+    rd_vld_bits_o = valid_mem[cache_index];
+    rd_hit_oh_o   = way_hit;
+    rd_data_o     = '0;
+    rd_user_o     = '0;
+
+    for (int way = 0; way < CVA6Cfg.DCACHE_SET_ASSOC; way++) begin
+      if (way_hit[way]) begin
+        rd_data_o = data_mem[cache_index][way];
+        rd_user_o = user_mem[cache_index][way];
+      end
+    end
+  end
   
   // Replacement policy implementation
   // For both modes we first try to find an invalid way. When none is
@@ -248,6 +332,16 @@ module wt_hybche_mem #(
       flushing_q   <= 1'b0;
       flush_cnt_q  <= '0;
       flush_ack_q  <= 1'b0;
+      // clear memory contents
+      for (int set = 0; set < CVA6Cfg.DCACHE_NUM_WORDS; set++) begin
+        valid_mem[set] <= '0;
+        for (int way = 0; way < CVA6Cfg.DCACHE_SET_ASSOC; way++) begin
+          data_mem[set][way] <= '0;
+          user_mem[set][way] <= '0;
+          tag_mem[set][way] <= '0;
+          fa_lookup_table[way].valid <= 1'b0;
+        end
+      end
     end else begin
       rr_ptr_q <= rr_ptr_d;
       lfsr_q   <= lfsr_d;
@@ -255,8 +349,56 @@ module wt_hybche_mem #(
       flushing_q  <= flushing_d;
       flush_cnt_q <= flush_cnt_d;
       flush_ack_q <= flush_ack_d;
+
+      // flush operation clears valid bits
+      if (flushing_q) begin
+        valid_mem[flush_cnt_q] <= '0;
+        for (int way = 0; way < CVA6Cfg.DCACHE_SET_ASSOC; way++) begin
+          data_mem[flush_cnt_q][way] <= '0;
+          user_mem[flush_cnt_q][way] <= '0;
+          tag_mem[flush_cnt_q][way] <= '0;
+        end
+      end else begin
+        // cacheline writes
+        if (wr_cl_vld_i) begin
+          logic [CVA6Cfg.DCACHE_INDEX_WIDTH-1:0] wr_index;
+          logic [CVA6Cfg.DCACHE_TAG_WIDTH-1:0]   wr_tag;
+          wr_index = use_set_assoc_mode_i ? wr_cl_idx_i :
+                      (wr_cl_tag_i ^ HASH_SEED ^ (wr_cl_tag_i >> $clog2(CVA6Cfg.DCACHE_SET_ASSOC))) & (CVA6Cfg.DCACHE_NUM_WORDS-1);
+          wr_tag   = use_set_assoc_mode_i ? wr_cl_tag_i : {wr_cl_idx_i, wr_cl_tag_i};
+          for (int way = 0; way < CVA6Cfg.DCACHE_SET_ASSOC; way++) begin
+            if (wr_cl_we_i[way]) begin
+              data_mem[wr_index][way] <= wr_cl_data_i;
+              user_mem[wr_index][way] <= wr_cl_user_i;
+              tag_mem[wr_index][way]  <= wr_tag;
+              valid_mem[wr_index][way] <= wr_vld_bits_i[way];
+              if (!use_set_assoc_mode_i) begin
+                fa_lookup_table[way].valid <= wr_vld_bits_i[way];
+                fa_lookup_table[way].tag   <= wr_tag;
+                fa_lookup_table[way].physical_set <= wr_index;
+              end
+            end
+          end
+        end
+
+        // single word writes
+        if (|wr_req_i) begin
+          logic [CVA6Cfg.DCACHE_INDEX_WIDTH-1:0] widx;
+          widx = use_set_assoc_mode_i ? wr_idx_i :
+                  (wr_idx_i ^ HASH_SEED ^ (wr_idx_i >> $clog2(CVA6Cfg.DCACHE_SET_ASSOC))) & (CVA6Cfg.DCACHE_NUM_WORDS-1);
+          for (int way = 0; way < CVA6Cfg.DCACHE_SET_ASSOC; way++) begin
+            if (wr_req_i[way]) begin
+              data_mem[widx][way][CVA6Cfg.XLEN-1:0] <= wr_data_i;
+              user_mem[widx][way][CVA6Cfg.DCACHE_USER_WIDTH-1:0] <= wr_user_i;
+              valid_mem[widx][way] <= 1'b1;
+            end
+          end
+        end
+      end
     end
   end
+
+  assign wr_ack_o = |wr_req_i;
 
   ///////////////////////////////
   // Flush control
