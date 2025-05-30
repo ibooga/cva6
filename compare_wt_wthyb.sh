@@ -277,7 +277,7 @@ echo "===================================================="
 if [ "$WT_CYCLES" != "N/A" ] && [ "$WT_HYB_SET_ASS_CYCLES" != "N/A" ] && [ "$WT_HYB_FULL_ASS_CYCLES" != "N/A" ]; then
     # If we have valid cycle counts, compare them
     if [ "$WT_CYCLES" = "$WT_HYB_SET_ASS_CYCLES" ] && [ "$WT_CYCLES" = "$WT_HYB_FULL_ASS_CYCLES" ]; then
-        PERFORMANCE_ANALYSIS="All three cache implementations completed in the exact same number of cycles (${WT_CYCLES}). This confirms that the current hybrid cache implementation has the same behavior regardless of mode selection. This is expected since we have not yet implemented different behavior for the different modes."
+        PERFORMANCE_ANALYSIS="All three cache implementations completed in the exact same number of cycles (${WT_CYCLES}). The hybrid cache now supports mode-specific behavior, but this workload did not expose any performance differences. The feature remains experimental and may behave differently on more demanding programs."
     else
         # There are differences in cycle counts
         PERFORMANCE_ANALYSIS="There are differences in cycle counts between the implementations:\\n\\n"
@@ -455,9 +455,9 @@ ${HITRATE_ANALYSIS}
 
 ## Conclusion
 
-This comparison validates that all three cache implementations function correctly with the test workload. The WT_HYB_FORCE_SET_ASS and WT_HYB_FORCE_FULL_ASS variants currently behave identically to the WT cache since the mode-specific behavior has not yet been implemented.
+This comparison validates that all three cache implementations function correctly with the test workload. Mode-specific behavior in the hybrid cache is implemented, but remains experimental. This particular run showed no noticeable difference between modes.
 
-The next phase of development will implement the actual behavioral differences between the different associativity modes, which should result in performance differences in the fully associative mode for workloads with poor locality or mapping conflicts.
+Further evaluation on more complex workloads is recommended to fully assess the benefits of the hybrid modes and the impact of the fully associative configuration.
 
 Test completed at: $(date)
 EOF
