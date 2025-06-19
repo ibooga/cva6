@@ -434,7 +434,8 @@ module wt_cln_dcache_wbuffer
     // checks if an invalidation/cache refill hits a particular word
     // note: an invalidation can hit multiple words!
     // need to respect previous cycle, too, since we add a cycle of latency to the rd_hit_oh_i signal...
-    assign wtag_comp[k] = wbuffer_q[k].wtag[CVA6Cfg.DCACHE_INDEX_WIDTH-CVA6Cfg.XLEN_ALIGN_BYTES-1:CVA6Cfg.DCACHE_OFFSET_WIDTH-CVA6Cfg.XLEN_ALIGN_BYTES];
+    assign wtag_comp[k] = (CVA6Cfg.DCACHE_INDEX_WIDTH > CVA6Cfg.DCACHE_OFFSET_WIDTH) ? 
+                           wbuffer_q[k].wtag[CVA6Cfg.DCACHE_INDEX_WIDTH-CVA6Cfg.XLEN_ALIGN_BYTES-1:CVA6Cfg.DCACHE_OFFSET_WIDTH-CVA6Cfg.XLEN_ALIGN_BYTES] : '0;
     assign inval_hit[k]  = (wr_cl_vld_d & valid[k] & (wtag_comp[k] == wr_cl_idx_d)) |
                            (wr_cl_vld_q & valid[k] & (wtag_comp[k] == wr_cl_idx_q));
 
