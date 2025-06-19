@@ -382,7 +382,9 @@ module wt_cln_dcache_wbuffer
   };
   assign rd_req_o = |tocheck;
   assign rd_tag_o = rd_tag_q;  //delay by one cycle
-  assign rd_idx_o = rd_paddr[CVA6Cfg.DCACHE_INDEX_WIDTH-1:CVA6Cfg.DCACHE_OFFSET_WIDTH];
+  assign rd_idx_o = (CVA6Cfg.DCACHE_INDEX_WIDTH > CVA6Cfg.DCACHE_OFFSET_WIDTH) ? 
+                      rd_paddr[CVA6Cfg.DCACHE_INDEX_WIDTH-1:CVA6Cfg.DCACHE_OFFSET_WIDTH] : 
+                      '0;
   assign rd_off_o = rd_paddr[CVA6Cfg.DCACHE_OFFSET_WIDTH-1:0];
   assign check_en_d = rd_req_o & rd_ack_i;
 
@@ -394,7 +396,9 @@ module wt_cln_dcache_wbuffer
   assign wr_paddr = {
     {CVA6Cfg.XLEN_ALIGN_BYTES{1'b0}}, wbuffer_q[rtrn_ptr].wtag << CVA6Cfg.XLEN_ALIGN_BYTES
   };
-  assign wr_idx_o = wr_paddr[CVA6Cfg.DCACHE_INDEX_WIDTH-1:CVA6Cfg.DCACHE_OFFSET_WIDTH];
+  assign wr_idx_o = (CVA6Cfg.DCACHE_INDEX_WIDTH > CVA6Cfg.DCACHE_OFFSET_WIDTH) ? 
+                      wr_paddr[CVA6Cfg.DCACHE_INDEX_WIDTH-1:CVA6Cfg.DCACHE_OFFSET_WIDTH] : 
+                      '0;
   assign wr_off_o = wr_paddr[CVA6Cfg.DCACHE_OFFSET_WIDTH-1:0];
   assign wr_data_o = wbuffer_q[rtrn_ptr].data;
   assign wr_user_o = wbuffer_q[rtrn_ptr].user;
