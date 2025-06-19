@@ -17,6 +17,7 @@
 module wt_cln_axi_adapter
   import ariane_pkg::*;
   import wt_cln_cache_pkg::*;
+  import wt_cache_pkg::*;
 #(
     parameter config_pkg::cva6_cfg_t CVA6Cfg = config_pkg::cva6_cfg_empty,
     parameter int unsigned ReqFifoDepth = 2,
@@ -458,7 +459,7 @@ module wt_cln_axi_adapter
   always_comb begin : p_axi_rtrn_shift
     // output directly from regs
     icache_rtrn_o          = '0;
-    icache_rtrn_o.rtype    = wt_cln_cache_pkg::ICACHE_IFILL_ACK;
+    icache_rtrn_o.rtype    = wt_cache_pkg::ICACHE_IFILL_ACK;
     icache_rtrn_o.tid      = icache_rtrn_tid_q;
     icache_rtrn_o.data     = icache_rd_shift_q;
     icache_rtrn_o.user     = icache_rd_shift_user_q;
