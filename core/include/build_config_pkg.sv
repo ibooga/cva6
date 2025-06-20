@@ -22,7 +22,8 @@ package build_config_pkg;
     int unsigned NrWbPorts = (CVA6Cfg.CvxifEn || EnableAccelerator) ? 5 : 4;
 
     int unsigned ICACHE_INDEX_WIDTH = $clog2(CVA6Cfg.IcacheByteSize / CVA6Cfg.IcacheSetAssoc);
-    int unsigned DCACHE_INDEX_WIDTH = $clog2(CVA6Cfg.DcacheByteSize / CVA6Cfg.DcacheSetAssoc);
+    // Force fully associative cache: INDEX_WIDTH = 0 means 1 set with all ways
+    int unsigned DCACHE_INDEX_WIDTH = 0; // $clog2(CVA6Cfg.DcacheByteSize / CVA6Cfg.DcacheSetAssoc);
     int unsigned DCACHE_OFFSET_WIDTH = $clog2(CVA6Cfg.DcacheLineWidth / 8);
 
     // MMU
@@ -147,7 +148,8 @@ package build_config_pkg;
     cfg.DCACHE_USER_LINE_WIDTH = (CVA6Cfg.AxiUserWidth == 1) ? 4 : CVA6Cfg.DcacheLineWidth;
     cfg.DCACHE_USER_WIDTH = CVA6Cfg.AxiUserWidth;
     cfg.DCACHE_OFFSET_WIDTH = DCACHE_OFFSET_WIDTH;
-    cfg.DCACHE_NUM_WORDS = 2 ** (DCACHE_INDEX_WIDTH - DCACHE_OFFSET_WIDTH);
+    // For fully associative cache (INDEX_WIDTH=0), each way has depth 1
+    cfg.DCACHE_NUM_WORDS = (DCACHE_INDEX_WIDTH == 0) ? 1 : 2 ** (DCACHE_INDEX_WIDTH - DCACHE_OFFSET_WIDTH);
 
     cfg.DCACHE_MAX_TX = unsigned'(2 ** CVA6Cfg.MemTidWidth);
 

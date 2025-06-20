@@ -85,8 +85,8 @@ module wt_cln_dcache_ctrl
   // map address to tag/idx/offset and save
   assign vld_data_d = (rd_req_q) ? rd_vld_bits_i : vld_data_q;
   assign address_tag_d = (save_tag) ? req_port_i.address_tag : address_tag_q;
-  assign address_idx_d = (req_port_o.data_gnt) ? ((CVA6Cfg.DCACHE_INDEX_WIDTH > CVA6Cfg.DCACHE_OFFSET_WIDTH) ? 
-                                                   req_port_i.address_index[CVA6Cfg.DCACHE_INDEX_WIDTH-1:CVA6Cfg.DCACHE_OFFSET_WIDTH] : '0) : address_idx_q;
+  assign address_idx_d = (req_port_o.data_gnt) ? 
+                         safe_get_cache_index(req_port_i.address_index, CVA6Cfg.DCACHE_INDEX_WIDTH, CVA6Cfg.DCACHE_OFFSET_WIDTH) : address_idx_q;
   assign address_off_d = (req_port_o.data_gnt) ? req_port_i.address_index[CVA6Cfg.DCACHE_OFFSET_WIDTH-1:0]                  : address_off_q;
   assign id_d = (req_port_o.data_gnt) ? req_port_i.data_id : id_q;
   assign data_size_d = (req_port_o.data_gnt) ? req_port_i.data_size : data_size_q;

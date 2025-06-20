@@ -151,4 +151,39 @@ package wt_cln_cache_pkg;
     return size;
   endfunction : toSize32
 
+  // Safe index extraction function for fully associative cache support
+  // Handles the case where INDEX_WIDTH = 0 (fully associative cache with 1 set)
+  function automatic logic [63:0] safe_get_index(
+      input logic [63:0] addr,
+      input int INDEX_WIDTH,
+      input int OFFSET_WIDTH
+  );
+    logic [63:0] result;
+    if (INDEX_WIDTH == 0) begin
+      result = '0;  // No index bits for fully associative cache
+    end else if (INDEX_WIDTH <= OFFSET_WIDTH) begin
+      result = '0;  // Safety fallback - invalid configuration
+    end else begin
+      result = (addr >> OFFSET_WIDTH) & ((1 << INDEX_WIDTH) - 1);
+    end
+    return result;
+  endfunction : safe_get_index
+
+  // Safe index extraction with proper width for cache index
+  function automatic logic [31:0] safe_get_cache_index(
+      input logic [63:0] addr,
+      input int INDEX_WIDTH,
+      input int OFFSET_WIDTH
+  );
+    logic [31:0] result;
+    if (INDEX_WIDTH == 0) begin
+      result = '0;  // No index bits for fully associative cache
+    end else if (INDEX_WIDTH <= OFFSET_WIDTH) begin
+      result = '0;  // Safety fallback - invalid configuration
+    end else begin
+      result = (addr >> OFFSET_WIDTH) & ((1 << INDEX_WIDTH) - 1);
+    end
+    return result;
+  endfunction : safe_get_cache_index
+
 endpackage

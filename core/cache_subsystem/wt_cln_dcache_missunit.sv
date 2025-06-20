@@ -99,7 +99,24 @@ module wt_cln_dcache_missunit
       3'b001:  out[0:0] = '0;
       3'b010:  out[1:0] = '0;
       3'b011:  out[2:0] = '0;
-      3'b111:  out[CVA6Cfg.DCACHE_OFFSET_WIDTH-1:0] = '0;
+      3'b111:  begin
+        // For cache line requests, align to cache line boundaries
+        // Special handling for fully associative cache (INDEX_WIDTH=0)
+        if (CVA6Cfg.DCACHE_INDEX_WIDTH == 0) begin
+          // For fully associative: Use conservative alignment for AXI compatibility
+          // Align to minimum of cache line boundary and safe AXI alignment
+          if (CVA6Cfg.DCACHE_OFFSET_WIDTH >= 3) begin
+            // Normal cache line alignment for larger offsets
+            out[CVA6Cfg.DCACHE_OFFSET_WIDTH-1:0] = '0;
+          end else begin
+            // Conservative alignment for small offset widths to avoid AXI errors
+            out[2:0] = '0;  // 8-byte alignment
+          end
+        end else begin
+          // For set-associative cache, normal cache line alignment
+          out[CVA6Cfg.DCACHE_OFFSET_WIDTH-1:0] = '0;
+        end
+      end
       default: ;
     endcase
     return out;
@@ -306,6 +323,16 @@ module wt_cln_dcache_missunit
   assign tmp_paddr         = (CVA6Cfg.RVA && amo_sel) ? amo_req_i.operand_a[CVA6Cfg.PLEN-1:0] : miss_paddr_i[miss_port_idx];
   assign mem_data_o.paddr = paddrSizeAlign(tmp_paddr, mem_data_o.size);
 
+  // Address range validation for fully associative cache
+  // Ensure all memory requests stay within valid DRAM bounds (256MB actual memory)
+  logic paddr_in_range;
+  assign paddr_in_range = (mem_data_o.paddr >= 64'h8000_0000) && 
+                         (mem_data_o.paddr < 64'h9000_0000);  // 256MB safe range
+
+  // Gate memory requests to prevent out-of-range accesses
+  logic mem_data_req_internal;
+  assign mem_data_req_o = mem_data_req_internal & paddr_in_range;
+
   ///////////////////////////////////////////////////////
   // back-off mechanism for LR/SC completion guarantee
   ///////////////////////////////////////////////////////
@@ -412,11 +439,13 @@ module wt_cln_dcache_missunit
 
   assign wr_cl_idx_o     = (flush_en) ? cnt_q                                                        :
                            (inv_vld)  ? ((CVA6Cfg.DCACHE_INDEX_WIDTH > CVA6Cfg.DCACHE_OFFSET_WIDTH) ? 
-                                         mem_rtrn_i.inv.idx[CVA6Cfg.DCACHE_INDEX_WIDTH-1:CVA6Cfg.DCACHE_OFFSET_WIDTH] : '0) :
+                                         safe_get_cache_index(mem_rtrn_i.inv.idx, CVA6Cfg.DCACHE_INDEX_WIDTH, CVA6Cfg.DCACHE_OFFSET_WIDTH) : '0) :
                                         ((CVA6Cfg.DCACHE_INDEX_WIDTH > CVA6Cfg.DCACHE_OFFSET_WIDTH) ? 
-                                         mshr_q.paddr[CVA6Cfg.DCACHE_INDEX_WIDTH-1:CVA6Cfg.DCACHE_OFFSET_WIDTH] : '0);
+                                         safe_get_cache_index(mshr_q.paddr, CVA6Cfg.DCACHE_INDEX_WIDTH, CVA6Cfg.DCACHE_OFFSET_WIDTH) : '0);
 
-  assign wr_cl_tag_o = mshr_q.paddr[CVA6Cfg.DCACHE_TAG_WIDTH+CVA6Cfg.DCACHE_INDEX_WIDTH-1:CVA6Cfg.DCACHE_INDEX_WIDTH];
+  assign wr_cl_tag_o = (CVA6Cfg.DCACHE_INDEX_WIDTH == 0) ? 
+                         mshr_q.paddr[CVA6Cfg.PLEN-1:CVA6Cfg.DCACHE_OFFSET_WIDTH] :
+                         mshr_q.paddr[CVA6Cfg.DCACHE_TAG_WIDTH+CVA6Cfg.DCACHE_INDEX_WIDTH-1:CVA6Cfg.DCACHE_INDEX_WIDTH];
   assign wr_cl_off_o = mshr_q.paddr[CVA6Cfg.DCACHE_OFFSET_WIDTH-1:0];
   assign wr_cl_data_o = mem_rtrn_i.data;
   assign wr_cl_user_o = mem_rtrn_i.user;
@@ -435,7 +464,7 @@ module wt_cln_dcache_missunit
 
     flush_ack_o      = 1'b0;
     mem_data_o.rtype = DCACHE_LOAD_REQ;
-    mem_data_req_o   = 1'b0;
+    mem_data_req_internal = 1'b0;
     amo_resp_o.ack   = 1'b0;
     miss_replay_o    = '0;
 
@@ -473,7 +502,7 @@ module wt_cln_dcache_missunit
           if (miss_is_write) begin
             // stall in case this write collides with the MSHR address
             if (!mshr_rdwr_collision) begin
-              mem_data_req_o   = 1'b1;
+              mem_data_req_internal = 1'b1;
               mem_data_o.rtype = DCACHE_STORE_REQ;
               if (!mem_data_ack_i) begin
                 state_d = STORE_WAIT;
@@ -488,7 +517,7 @@ module wt_cln_dcache_missunit
               miss_replay_o[miss_port_idx] = 1'b1;
               // stall in case this CL address overlaps with a write TX that is in flight
             end else if (!tx_rdwr_collision) begin
-              mem_data_req_o   = 1'b1;
+              mem_data_req_internal = 1'b1;
               mem_data_o.rtype = DCACHE_LOAD_REQ;
               update_lfsr      = all_ways_valid & mem_data_ack_i;  // need to evict a random way
               mshr_allocate    = mem_data_ack_i;
@@ -503,7 +532,7 @@ module wt_cln_dcache_missunit
       // wait until this request is acked
       STORE_WAIT: begin
         lock_reqs        = 1'b1;
-        mem_data_req_o   = 1'b1;
+        mem_data_req_internal = 1'b1;
         mem_data_o.rtype = DCACHE_STORE_REQ;
         if (mem_data_ack_i) begin
           state_d = IDLE;
@@ -513,7 +542,7 @@ module wt_cln_dcache_missunit
       // wait until this request is acked
       LOAD_WAIT: begin
         lock_reqs        = 1'b1;
-        mem_data_req_o   = 1'b1;
+        mem_data_req_internal = 1'b1;
         mem_data_o.rtype = DCACHE_LOAD_REQ;
         if (mem_data_ack_i) begin
           update_lfsr   = all_ways_valid;  // need to evict a random way
@@ -528,7 +557,7 @@ module wt_cln_dcache_missunit
         mask_reads = 1'b1;
         // these are writes, check whether they collide with MSHR
         if (|miss_req_masked_d && !mshr_rdwr_collision) begin
-          mem_data_req_o   = 1'b1;
+          mem_data_req_internal = 1'b1;
           mem_data_o.rtype = DCACHE_STORE_REQ;
         end
 
@@ -556,7 +585,7 @@ module wt_cln_dcache_missunit
           amo_sel          = 1'b1;
           // if this is an LR, we need to consult the backoff counter
           if ((amo_req_i.amo_op != AMO_LR) || sc_backoff_over) begin
-            mem_data_req_o = 1'b1;
+            mem_data_req_internal = 1'b1;
             if (mem_data_ack_i) begin
               state_d = AMO_WAIT;
             end

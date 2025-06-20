@@ -40,7 +40,7 @@ module wt_cln_dcache_mem
 
     // ports
     input logic [NumPorts-1:0][CVA6Cfg.DCACHE_TAG_WIDTH-1:0] rd_tag_i,  // tag in - comes one cycle later
-    input logic [NumPorts-1:0][DCACHE_CL_IDX_WIDTH-1:0] rd_idx_i,
+    input logic [NumPorts-1:0][DCACHE_CL_IDX_WIDTH == 0 ? 0 : DCACHE_CL_IDX_WIDTH-1:0] rd_idx_i,
     input logic [NumPorts-1:0][CVA6Cfg.DCACHE_OFFSET_WIDTH-1:0] rd_off_i,
     input logic [NumPorts-1:0] rd_req_i,  // read the word at offset off_i[:3] in all ways
     input  logic  [NumPorts-1:0]                              rd_tag_only_i,      // only do a tag/valid lookup, no access to data arrays
@@ -56,7 +56,7 @@ module wt_cln_dcache_mem
     input logic                                      wr_cl_nc_i,       // noncacheable access
     input logic [      CVA6Cfg.DCACHE_SET_ASSOC-1:0] wr_cl_we_i,       // writes a full cacheline
     input logic [      CVA6Cfg.DCACHE_TAG_WIDTH-1:0] wr_cl_tag_i,
-    input logic [           DCACHE_CL_IDX_WIDTH-1:0] wr_cl_idx_i,
+    input logic [DCACHE_CL_IDX_WIDTH == 0 ? 0 : DCACHE_CL_IDX_WIDTH-1:0] wr_cl_idx_i,
     input logic [   CVA6Cfg.DCACHE_OFFSET_WIDTH-1:0] wr_cl_off_i,
     input logic [     CVA6Cfg.DCACHE_LINE_WIDTH-1:0] wr_cl_data_i,
     input logic [CVA6Cfg.DCACHE_USER_LINE_WIDTH-1:0] wr_cl_user_i,
@@ -66,7 +66,7 @@ module wt_cln_dcache_mem
     // separate port for single word write, no tag access
     input logic [CVA6Cfg.DCACHE_SET_ASSOC-1:0] wr_req_i,  // write a single word to offset off_i[:3]
     output logic wr_ack_o,
-    input logic [DCACHE_CL_IDX_WIDTH-1:0] wr_idx_i,
+    input logic [DCACHE_CL_IDX_WIDTH == 0 ? 0 : DCACHE_CL_IDX_WIDTH-1:0] wr_idx_i,
     input logic [CVA6Cfg.DCACHE_OFFSET_WIDTH-1:0] wr_off_i,
     input logic [CVA6Cfg.XLEN-1:0] wr_data_i,
     input logic [CVA6Cfg.DCACHE_USER_WIDTH-1:0] wr_user_i,
@@ -99,8 +99,8 @@ module wt_cln_dcache_mem
   logic [DCACHE_NUM_BANKS-1:0]                                                     bank_req;
   logic [DCACHE_NUM_BANKS-1:0]                                                     bank_we;
   logic [DCACHE_NUM_BANKS-1:0][CVA6Cfg.DCACHE_SET_ASSOC-1:0][(CVA6Cfg.XLEN/8)-1:0] bank_be;
-  logic [DCACHE_NUM_BANKS-1:0][     DCACHE_CL_IDX_WIDTH-1:0]                       bank_idx;
-  logic [DCACHE_CL_IDX_WIDTH-1:0] bank_idx_d, bank_idx_q;
+  logic [DCACHE_NUM_BANKS-1:0][DCACHE_CL_IDX_WIDTH == 0 ? 0 : DCACHE_CL_IDX_WIDTH-1:0] bank_idx;
+  logic [DCACHE_CL_IDX_WIDTH == 0 ? 0 : DCACHE_CL_IDX_WIDTH-1:0] bank_idx_d, bank_idx_q;
   logic [CVA6Cfg.DCACHE_OFFSET_WIDTH-1:0] bank_off_d, bank_off_q;
 
   logic [DCACHE_NUM_BANKS-1:0][CVA6Cfg.DCACHE_SET_ASSOC-1:0][CVA6Cfg.XLEN-1:0] bank_wdata;  //
@@ -115,7 +115,7 @@ module wt_cln_dcache_mem
   logic vld_we;  // valid bits write enable
   logic [CVA6Cfg.DCACHE_SET_ASSOC-1:0] vld_wdata;  // valid bits to write
   logic [CVA6Cfg.DCACHE_SET_ASSOC-1:0][CVA6Cfg.DCACHE_TAG_WIDTH-1:0]            tag_rdata;                    // these are the tags coming from the tagmem
-  logic [DCACHE_CL_IDX_WIDTH-1:0] vld_addr;  // valid bit
+  logic [DCACHE_CL_IDX_WIDTH == 0 ? 0 : DCACHE_CL_IDX_WIDTH-1:0] vld_addr;  // valid bit
 
   logic [$clog2(NumPorts)-1:0] vld_sel_d, vld_sel_q;
 
@@ -235,8 +235,10 @@ module wt_cln_dcache_mem
   assign cmp_en_d = (|vld_req) & ~vld_we;
 
   // word tag comparison in write buffer
-  assign wbuffer_cmp_addr = (wr_cl_vld_i) ? {wr_cl_tag_i, wr_cl_idx_i, wr_cl_off_i} :
-                                            {rd_tag, bank_idx_q, bank_off_q};
+  logic [CVA6Cfg.PLEN-1:0] wr_addr, rd_addr;
+  assign wr_addr = {wr_cl_tag_i, wr_cl_idx_i, wr_cl_off_i};
+  assign rd_addr = {rd_tag, bank_idx_q, bank_off_q};
+  assign wbuffer_cmp_addr = (wr_cl_vld_i) ? wr_addr : rd_addr;
   // hit generation
   for (genvar i = 0; i < CVA6Cfg.DCACHE_SET_ASSOC; i++) begin : gen_tag_cmpsel
     // tag comparison of ways >0
