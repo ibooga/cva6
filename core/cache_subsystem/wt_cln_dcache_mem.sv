@@ -201,27 +201,36 @@ module wt_cln_dcache_mem
       bank_collision[k] = rd_off_i[k][CVA6Cfg.DCACHE_OFFSET_WIDTH-1:CVA6Cfg.XLEN_ALIGN_BYTES] == wr_off_i[CVA6Cfg.DCACHE_OFFSET_WIDTH-1:CVA6Cfg.XLEN_ALIGN_BYTES];
     end
 
-    if (wr_cl_vld_i & |wr_cl_we_i) begin
-      bank_req = '1;
-      bank_we  = '1;
-      bank_idx = '{default: wr_cl_idx_i};
-    end else begin
-      if (rd_acked) begin
-        if (!rd_tag_only_i[vld_sel_d]) begin
-          bank_req = dcache_cl_bin2oh(
-              rd_off_i[vld_sel_d][CVA6Cfg.DCACHE_OFFSET_WIDTH-1:CVA6Cfg.XLEN_ALIGN_BYTES]);
-          bank_idx[rd_off_i[vld_sel_d][CVA6Cfg.DCACHE_OFFSET_WIDTH-1:CVA6Cfg.XLEN_ALIGN_BYTES]] = rd_idx_i[vld_sel_d];
-        end
-      end
-
+    // Handle FA mode vs SA mode
+    if (CVA6Cfg.DCACHE_INDEX_WIDTH == 0) begin
+      // FA mode: Only handle single word write acknowledgment
       if (|wr_req_i) begin
-        if (rd_tag_only_i[vld_sel_d] || !(rd_ack_o[vld_sel_d] && bank_collision[vld_sel_d])) begin
-          wr_ack_o = 1'b1;
-          bank_req |= dcache_cl_bin2oh(
-              wr_off_i[CVA6Cfg.DCACHE_OFFSET_WIDTH-1:CVA6Cfg.XLEN_ALIGN_BYTES]
-          );
-          bank_we =
-              dcache_cl_bin2oh(wr_off_i[CVA6Cfg.DCACHE_OFFSET_WIDTH-1:CVA6Cfg.XLEN_ALIGN_BYTES]);
+        wr_ack_o = 1'b1;
+      end
+    end else begin
+      // SA mode: Full banking logic
+      if (wr_cl_vld_i & |wr_cl_we_i) begin
+        bank_req = '1;
+        bank_we  = '1;
+        bank_idx = '{default: wr_cl_idx_i};
+      end else begin
+        if (rd_acked) begin
+          if (!rd_tag_only_i[vld_sel_d]) begin
+            bank_req = dcache_cl_bin2oh(
+                rd_off_i[vld_sel_d][CVA6Cfg.DCACHE_OFFSET_WIDTH-1:CVA6Cfg.XLEN_ALIGN_BYTES]);
+            bank_idx[rd_off_i[vld_sel_d][CVA6Cfg.DCACHE_OFFSET_WIDTH-1:CVA6Cfg.XLEN_ALIGN_BYTES]] = rd_idx_i[vld_sel_d];
+          end
+        end
+
+        if (|wr_req_i) begin
+          if (rd_tag_only_i[vld_sel_d] || !(rd_ack_o[vld_sel_d] && bank_collision[vld_sel_d])) begin
+            wr_ack_o = 1'b1;
+            bank_req |= dcache_cl_bin2oh(
+                wr_off_i[CVA6Cfg.DCACHE_OFFSET_WIDTH-1:CVA6Cfg.XLEN_ALIGN_BYTES]
+            );
+            bank_we =
+                dcache_cl_bin2oh(wr_off_i[CVA6Cfg.DCACHE_OFFSET_WIDTH-1:CVA6Cfg.XLEN_ALIGN_BYTES]);
+          end
         end
       end
     end
@@ -309,31 +318,38 @@ module wt_cln_dcache_mem
 
   logic [CVA6Cfg.DCACHE_TAG_WIDTH:0] vld_tag_rdata[CVA6Cfg.DCACHE_SET_ASSOC-1:0];
 
-  // Simple Full Cache Line FA Implementation 
-  if (CVA6Cfg.DCACHE_INDEX_WIDTH == 0) begin : gen_fa_simple
-    // FA implementation using full cache line storage per way
-    // This bypasses complex banking and uses simple one SRAM per way approach
+  // Fully Associative Cache Implementation - Bypasses Banking Infrastructure
+  if (CVA6Cfg.DCACHE_INDEX_WIDTH == 0) begin : gen_fa_bypass
+    // FA cache with direct cache line storage, bypassing complex banking
     
-    // Individual SRAM per way storing complete cache lines
-    logic [CVA6Cfg.DCACHE_SET_ASSOC-1:0] fa_data_req;
-    logic [CVA6Cfg.DCACHE_SET_ASSOC-1:0] fa_data_we;
-    logic [CVA6Cfg.DCACHE_SET_ASSOC-1:0][CVA6Cfg.DCACHE_LINE_WIDTH-1:0] fa_data_wdata;
-    logic [CVA6Cfg.DCACHE_SET_ASSOC-1:0][CVA6Cfg.DCACHE_LINE_WIDTH-1:0] fa_data_rdata;
+    // FA control and data signals
+    logic fa_read_req, fa_read_ack;
+    logic fa_cl_write_req, fa_cl_write_ack;
+    logic fa_word_write_req, fa_word_write_ack;
+    logic [CVA6Cfg.DCACHE_OFFSET_WIDTH-1:0] fa_read_offset;
+    logic [CVA6Cfg.DCACHE_TAG_WIDTH-1:0] fa_read_tag, fa_write_tag;
+    logic [CVA6Cfg.DCACHE_SET_ASSOC-1:0] fa_write_way;
+    logic [CVA6Cfg.DCACHE_LINE_WIDTH-1:0] fa_write_cl_data;
+    logic [CVA6Cfg.DCACHE_LINE_WIDTH/8-1:0] fa_write_cl_be;
+    logic [CVA6Cfg.XLEN-1:0] fa_write_word_data;
+    logic [(CVA6Cfg.XLEN/8)-1:0] fa_write_word_be;
+    logic [CVA6Cfg.DCACHE_OFFSET_WIDTH-1:0] fa_write_word_offset;
+    
+    // FA storage arrays - simplified organization
+    logic [CVA6Cfg.DCACHE_SET_ASSOC-1:0] fa_data_req, fa_data_we;
+    logic [CVA6Cfg.DCACHE_SET_ASSOC-1:0][CVA6Cfg.DCACHE_LINE_WIDTH-1:0] fa_data_wdata, fa_data_rdata;
     logic [CVA6Cfg.DCACHE_SET_ASSOC-1:0][CVA6Cfg.DCACHE_LINE_WIDTH/8-1:0] fa_data_be;
+    logic [CVA6Cfg.DCACHE_SET_ASSOC-1:0] fa_tag_req, fa_tag_we;
+    logic [CVA6Cfg.DCACHE_SET_ASSOC-1:0][CVA6Cfg.DCACHE_TAG_WIDTH:0] fa_tag_wdata, fa_tag_rdata;
     
-    logic [CVA6Cfg.DCACHE_SET_ASSOC-1:0] fa_tag_req;
-    logic [CVA6Cfg.DCACHE_SET_ASSOC-1:0] fa_tag_we;
-    logic [CVA6Cfg.DCACHE_SET_ASSOC-1:0][CVA6Cfg.DCACHE_TAG_WIDTH:0] fa_tag_wdata;
-    logic [CVA6Cfg.DCACHE_SET_ASSOC-1:0][CVA6Cfg.DCACHE_TAG_WIDTH:0] fa_tag_rdata;
-    
-    // FA addressing - single address since no indexing
+    // FA address is always 0 (single entry per way)
     localparam FA_ADDR_BITS = (CVA6Cfg.DCACHE_NUM_WORDS > 1) ? $clog2(CVA6Cfg.DCACHE_NUM_WORDS) : 1;
     logic [FA_ADDR_BITS-1:0] fa_addr;
-    assign fa_addr = '0; // Always address 0 for FA
+    assign fa_addr = '0;
     
-    // Generate one SRAM per way
+    // Generate storage arrays
     for (genvar way = 0; way < CVA6Cfg.DCACHE_SET_ASSOC; way++) begin : gen_fa_way
-      // Data SRAM storing full cache lines
+      // Data SRAM - stores full cache lines
       sram_cache #(
           .DATA_WIDTH (CVA6Cfg.DCACHE_LINE_WIDTH),
           .USER_EN    (0),
@@ -353,7 +369,7 @@ module wt_cln_dcache_mem
           .rdata_o(fa_data_rdata[way])
       );
       
-      // Tag SRAM per way
+      // Tag+Valid SRAM 
       sram_cache #(
           .DATA_WIDTH (CVA6Cfg.DCACHE_TAG_WIDTH + 1),
           .USER_EN    (0),
@@ -373,25 +389,85 @@ module wt_cln_dcache_mem
           .rdata_o(fa_tag_rdata[way])
       );
       
-      // FA control signals - cache line writes only for now
-      assign fa_data_req[way] = |bank_req;  // Any data request triggers all ways
-      assign fa_data_we[way] = wr_cl_vld_i & wr_cl_we_i[way];  // Only cache line writes for now
-      assign fa_data_wdata[way] = wr_cl_data_i;  // Write full cache line
-      assign fa_data_be[way] = (wr_cl_vld_i & wr_cl_we_i[way]) ? wr_cl_data_be_i : '0;
+      // Way control logic
+      assign fa_data_req[way] = fa_read_req | (fa_cl_write_req & fa_write_way[way]) | (fa_word_write_req & fa_write_way[way]);
+      assign fa_data_we[way] = (fa_cl_write_req & fa_write_way[way]) | (fa_word_write_req & fa_write_way[way]);
+      assign fa_tag_req[way] = fa_read_req | fa_cl_write_req | fa_word_write_req;
+      assign fa_tag_we[way] = (fa_cl_write_req | fa_word_write_req) & fa_write_way[way];
       
-      assign fa_tag_req[way] = |vld_req;  // Any tag request
-      assign fa_tag_we[way] = vld_we & vld_req[way];  // Way-specific tag write
-      assign fa_tag_wdata[way] = {wr_cl_tag_i, vld_wdata[way]};
+      // Data and tag write muxing
+      always_comb begin
+        if (fa_cl_write_req & fa_write_way[way]) begin
+          // Cache line write
+          fa_data_wdata[way] = fa_write_cl_data;
+          fa_data_be[way] = fa_write_cl_be;
+          fa_tag_wdata[way] = {fa_write_tag, 1'b1}; // Tag + valid
+        end else if (fa_word_write_req & fa_write_way[way]) begin
+          // Single word write - read-modify-write
+          fa_data_wdata[way] = fa_data_rdata[way]; // Default to current data
+          fa_data_be[way] = '0; // Default to no write
+          // Update specific word
+          fa_data_wdata[way][fa_write_word_offset*CVA6Cfg.XLEN +: CVA6Cfg.XLEN] = fa_write_word_data;
+          fa_data_be[way][fa_write_word_offset*(CVA6Cfg.XLEN/8) +: (CVA6Cfg.XLEN/8)] = fa_write_word_be;
+          fa_tag_wdata[way] = fa_tag_rdata[way]; // Keep existing tag+valid
+        end else begin
+          fa_data_wdata[way] = '0;
+          fa_data_be[way] = '0;
+          fa_tag_wdata[way] = '0;
+        end
+      end
       
-      // Tag outputs
+      // Extract tag and valid from storage
       assign tag_rdata[way] = fa_tag_rdata[way][CVA6Cfg.DCACHE_TAG_WIDTH-1:0];
       assign rd_vld_bits_o[way] = fa_tag_rdata[way][CVA6Cfg.DCACHE_TAG_WIDTH];
     end
     
-    // Map FA cache lines to bank interface for reads
+    // FA Controller - Interface with existing cache controller
+    always_comb begin
+      // Default outputs
+      fa_read_req = 1'b0;
+      fa_cl_write_req = 1'b0;
+      fa_word_write_req = 1'b0;
+      fa_read_offset = '0;
+      fa_read_tag = '0;
+      fa_write_way = '0;
+      fa_write_tag = '0;
+      fa_write_cl_data = '0;
+      fa_write_cl_be = '0;
+      fa_write_word_data = '0;
+      fa_write_word_be = '0;
+      fa_write_word_offset = '0;
+      
+      // Map existing cache controller signals to FA operations
+      if (|vld_req && !vld_we) begin
+        // Read request (tag lookup)
+        fa_read_req = 1'b1;
+        fa_read_tag = rd_tag;
+        fa_read_offset = bank_off_q;
+      end
+      
+      if (wr_cl_vld_i && |wr_cl_we_i) begin
+        // Cache line write
+        fa_cl_write_req = 1'b1;
+        fa_write_way = wr_cl_we_i;
+        fa_write_tag = wr_cl_tag_i;
+        fa_write_cl_data = wr_cl_data_i;
+        fa_write_cl_be = wr_cl_data_be_i;
+      end
+      
+      // For FA mode, acknowledge single word writes but don't actually handle them yet
+      // This prevents the cache controller from hanging on single word writes
+      if (|wr_req_i) begin
+        // Set wr_ack_o for single word writes in FA mode
+        // TODO: Implement proper single word write support
+      end
+    end
+    
+    // Note: wr_ack_o handled in banking logic section
+    
+    // Map FA cache lines to bank interface for compatibility
     for (genvar bank_word = 0; bank_word < DCACHE_NUM_BANKS; bank_word++) begin : gen_fa_read_map
       for (genvar way = 0; way < CVA6Cfg.DCACHE_SET_ASSOC; way++) begin : gen_fa_way_read
-        // Extract the appropriate word from the cache line stored in this way
         assign bank_rdata[bank_word][way] = fa_data_rdata[way][bank_word*CVA6Cfg.XLEN +: CVA6Cfg.XLEN];
       end
     end
