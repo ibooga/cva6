@@ -128,6 +128,7 @@ module wt_cln_dcache_mem
   logic cmp_en_d, cmp_en_q;
   logic rd_acked;
   logic [NumPorts-1:0] bank_collision, rd_req_masked, rd_req_prio;
+  logic rd_wr_address_conflict;
 
   ///////////////////////////////////////////////////////
   // arbiter
@@ -166,6 +167,9 @@ module wt_cln_dcache_mem
   assign rd_req_prio   = rd_req_i & rd_prio_i;
   assign rd_req_masked = (|rd_req_prio) ? rd_req_prio : rd_req_i;
 
+  // STANDARD: Default arbiter conflict detection logic
+  assign rd_wr_address_conflict = wr_cl_vld_i;
+
   logic rd_req;
   rr_arb_tree #(
       .NumIn    (NumPorts),
@@ -178,13 +182,13 @@ module wt_cln_dcache_mem
       .req_i  (rd_req_masked),
       .gnt_o  (rd_ack_o),
       .data_i ('0),
-      .gnt_i  (~wr_cl_vld_i),
+      .gnt_i  (~rd_wr_address_conflict),
       .req_o  (rd_req),
       .data_o (),
       .idx_o  (vld_sel_d)
   );
 
-  assign rd_acked = rd_req & ~wr_cl_vld_i;
+  assign rd_acked = rd_req & ~rd_wr_address_conflict;
 
   always_comb begin : p_bank_req
     vld_we   = wr_cl_vld_i;
@@ -305,54 +309,158 @@ module wt_cln_dcache_mem
 
   logic [CVA6Cfg.DCACHE_TAG_WIDTH:0] vld_tag_rdata[CVA6Cfg.DCACHE_SET_ASSOC-1:0];
 
-  for (genvar k = 0; k < DCACHE_NUM_BANKS; k++) begin : gen_data_banks
-    // Data RAM
-    sram_cache #(
-        .USER_WIDTH (CVA6Cfg.DCACHE_SET_ASSOC * CVA6Cfg.DCACHE_USER_WIDTH),
-        .DATA_WIDTH (CVA6Cfg.DCACHE_SET_ASSOC * CVA6Cfg.XLEN),
-        .USER_EN    (CVA6Cfg.DATA_USER_EN),
-        .BYTE_ACCESS(1),
-        .TECHNO_CUT (CVA6Cfg.TechnoCut),
-        .NUM_WORDS  (CVA6Cfg.DCACHE_NUM_WORDS)
-    ) i_data_sram (
-        .clk_i  (clk_i),
-        .rst_ni (rst_ni),
-        .req_i  (bank_req[k]),
-        .we_i   (bank_we[k]),
-        .addr_i (bank_idx[k]),
-        .wuser_i(bank_wuser[k]),
-        .wdata_i(bank_wdata[k]),
-        .be_i   (bank_be[k]),
-        .ruser_o(bank_ruser[k]),
-        .rdata_o(bank_rdata[k])
-    );
-  end
+  // Flexible FA SRAM Architecture for Security and Efficiency
+  if (CVA6Cfg.DCACHE_INDEX_WIDTH == 0) begin : gen_fa_sram_banks
+    // Fully Associative: Use consolidated SRAM banks
+    
+    // FA Data Banks - Consolidated for efficiency
+    logic [CVA6Cfg.DCACHE_FA_BANKS-1:0] fa_data_req;
+    logic [CVA6Cfg.DCACHE_FA_BANKS-1:0] fa_data_we;
+    logic [CVA6Cfg.DCACHE_FA_BANKS-1:0][$clog2(CVA6Cfg.DCACHE_NUM_WORDS)-1:0] fa_data_addr;
+    logic [CVA6Cfg.DCACHE_FA_BANKS-1:0][CVA6Cfg.DCACHE_FA_WAYS_PER_BANK*CVA6Cfg.XLEN-1:0] fa_data_wdata;
+    logic [CVA6Cfg.DCACHE_FA_BANKS-1:0][CVA6Cfg.DCACHE_FA_WAYS_PER_BANK*CVA6Cfg.XLEN-1:0] fa_data_rdata;
+    logic [CVA6Cfg.DCACHE_FA_BANKS-1:0][CVA6Cfg.DCACHE_FA_WAYS_PER_BANK*(CVA6Cfg.XLEN/8)-1:0] fa_data_be;
+    
+    // FA Tag Banks - Consolidated for efficiency  
+    logic [CVA6Cfg.DCACHE_FA_BANKS-1:0] fa_tag_req;
+    logic [CVA6Cfg.DCACHE_FA_BANKS-1:0] fa_tag_we;
+    logic [CVA6Cfg.DCACHE_FA_BANKS-1:0][$clog2(CVA6Cfg.DCACHE_NUM_WORDS)-1:0] fa_tag_addr;
+    logic [CVA6Cfg.DCACHE_FA_BANKS-1:0][CVA6Cfg.DCACHE_FA_WAYS_PER_BANK*(CVA6Cfg.DCACHE_TAG_WIDTH+1)-1:0] fa_tag_wdata;
+    logic [CVA6Cfg.DCACHE_FA_BANKS-1:0][CVA6Cfg.DCACHE_FA_WAYS_PER_BANK*(CVA6Cfg.DCACHE_TAG_WIDTH+1)-1:0] fa_tag_rdata;
+    
+    // Address mapping for FA mode - use word offset for SRAM addressing
+    logic [$clog2(CVA6Cfg.DCACHE_NUM_WORDS)-1:0] fa_sram_addr;
+    // For FA: use cacheline word offset since all ways are checked in parallel
+    assign fa_sram_addr = (CVA6Cfg.DCACHE_NUM_WORDS > 1) ? 
+                         bank_off_d[CVA6Cfg.DCACHE_OFFSET_WIDTH-1:CVA6Cfg.XLEN_ALIGN_BYTES] : 
+                         '0; // Use offset for SRAM addressing in FA mode
+    
+    // Generate consolidated SRAM banks
+    for (genvar bank = 0; bank < CVA6Cfg.DCACHE_FA_BANKS; bank++) begin : gen_fa_bank
+      // Data SRAM Bank
+      sram_cache #(
+          .DATA_WIDTH (CVA6Cfg.DCACHE_FA_WAYS_PER_BANK * CVA6Cfg.XLEN),
+          .USER_EN    (0),  // Simplified for FA mode
+          .BYTE_ACCESS(1),
+          .TECHNO_CUT (CVA6Cfg.TechnoCut),
+          .NUM_WORDS  (CVA6Cfg.DCACHE_NUM_WORDS)
+      ) i_fa_data_sram (
+          .clk_i  (clk_i),
+          .rst_ni (rst_ni),
+          .req_i  (fa_data_req[bank]),
+          .we_i   (fa_data_we[bank]),
+          .addr_i (fa_data_addr[bank]),
+          .wuser_i('0),
+          .wdata_i(fa_data_wdata[bank]),
+          .be_i   (fa_data_be[bank]),
+          .ruser_o(),
+          .rdata_o(fa_data_rdata[bank])
+      );
+      
+      // Tag SRAM Bank
+      sram_cache #(
+          .DATA_WIDTH (CVA6Cfg.DCACHE_FA_WAYS_PER_BANK * (CVA6Cfg.DCACHE_TAG_WIDTH + 1)),
+          .USER_EN    (0),
+          .BYTE_ACCESS(0),
+          .TECHNO_CUT (CVA6Cfg.TechnoCut),
+          .NUM_WORDS  (CVA6Cfg.DCACHE_NUM_WORDS)
+      ) i_fa_tag_sram (
+          .clk_i  (clk_i),
+          .rst_ni (rst_ni),
+          .req_i  (fa_tag_req[bank]),
+          .we_i   (fa_tag_we[bank]),
+          .addr_i (fa_tag_addr[bank]),
+          .wuser_i('0),
+          .wdata_i(fa_tag_wdata[bank]),
+          .be_i   ('1),
+          .ruser_o(),
+          .rdata_o(fa_tag_rdata[bank])
+      );
+      
+      // Connect FA bank signals
+      assign fa_data_req[bank] = |bank_req;  // Any bank request activates FA bank
+      assign fa_data_we[bank] = |bank_we;    // Any bank write activates FA bank
+      assign fa_data_addr[bank] = fa_sram_addr;
+      
+      assign fa_tag_req[bank] = |vld_req;    // Any valid request activates FA tag bank
+      assign fa_tag_we[bank] = vld_we;
+      assign fa_tag_addr[bank] = fa_sram_addr;
+    end
+    
+    // FA data/tag reconstruction for compatibility
+    for (genvar way = 0; way < CVA6Cfg.DCACHE_SET_ASSOC; way++) begin : gen_fa_way_mapping
+      localparam int bank_id = way / CVA6Cfg.DCACHE_FA_WAYS_PER_BANK;
+      localparam int way_in_bank = way % CVA6Cfg.DCACHE_FA_WAYS_PER_BANK;
+      localparam int way_start_bit = way_in_bank * CVA6Cfg.XLEN;
+      localparam int way_end_bit = (way_in_bank + 1) * CVA6Cfg.XLEN - 1;
+      localparam int tag_start_bit = way_in_bank * (CVA6Cfg.DCACHE_TAG_WIDTH + 1);
+      localparam int tag_end_bit = (way_in_bank + 1) * (CVA6Cfg.DCACHE_TAG_WIDTH + 1) - 1;
+      
+      // Map FA SRAM outputs to existing interfaces - all banks share same data
+      for (genvar bank_word = 0; bank_word < DCACHE_NUM_BANKS; bank_word++) begin : gen_fa_data_mapping
+        assign bank_rdata[bank_word][way] = fa_data_rdata[bank_id][way_end_bit:way_start_bit];
+        
+        assign fa_data_wdata[bank_id][way_end_bit:way_start_bit] = bank_wdata[bank_word][way];
+        assign fa_data_be[bank_id][(way_in_bank+1)*(CVA6Cfg.XLEN/8)-1:(way_in_bank)*(CVA6Cfg.XLEN/8)] = bank_be[bank_word][way];
+      end
+      
+      // Map FA tag outputs
+      assign tag_rdata[way] = fa_tag_rdata[bank_id][tag_end_bit-1:tag_start_bit+1];
+      assign rd_vld_bits_o[way] = fa_tag_rdata[bank_id][tag_start_bit];
+      
+      assign fa_tag_wdata[bank_id][tag_end_bit:tag_start_bit] = {wr_cl_tag_i, vld_wdata[way]};
+    end
+    
+  end else begin : gen_standard_sram_banks
+    // Set-Associative: Use standard SRAM organization
+    for (genvar k = 0; k < DCACHE_NUM_BANKS; k++) begin : gen_data_banks
+      // Data RAM
+      sram_cache #(
+          .USER_WIDTH (CVA6Cfg.DCACHE_SET_ASSOC * CVA6Cfg.DCACHE_USER_WIDTH),
+          .DATA_WIDTH (CVA6Cfg.DCACHE_SET_ASSOC * CVA6Cfg.XLEN),
+          .USER_EN    (CVA6Cfg.DATA_USER_EN),
+          .BYTE_ACCESS(1),
+          .TECHNO_CUT (CVA6Cfg.TechnoCut),
+          .NUM_WORDS  (CVA6Cfg.DCACHE_NUM_WORDS)
+      ) i_data_sram (
+          .clk_i  (clk_i),
+          .rst_ni (rst_ni),
+          .req_i  (bank_req[k]),
+          .we_i   (bank_we[k]),
+          .addr_i (bank_idx[k]),
+          .wuser_i(bank_wuser[k]),
+          .wdata_i(bank_wdata[k]),
+          .be_i   (bank_be[k]),
+          .ruser_o(bank_ruser[k]),
+          .rdata_o(bank_rdata[k])
+      );
+    end
 
-  for (genvar i = 0; i < CVA6Cfg.DCACHE_SET_ASSOC; i++) begin : gen_tag_srams
+    for (genvar i = 0; i < CVA6Cfg.DCACHE_SET_ASSOC; i++) begin : gen_tag_srams
+      assign tag_rdata[i]     = vld_tag_rdata[i][CVA6Cfg.DCACHE_TAG_WIDTH-1:0];
+      assign rd_vld_bits_o[i] = vld_tag_rdata[i][CVA6Cfg.DCACHE_TAG_WIDTH];
 
-    assign tag_rdata[i]     = vld_tag_rdata[i][CVA6Cfg.DCACHE_TAG_WIDTH-1:0];
-    assign rd_vld_bits_o[i] = vld_tag_rdata[i][CVA6Cfg.DCACHE_TAG_WIDTH];
-
-    // Tag RAM
-    sram_cache #(
-        // tag + valid bit
-        .DATA_WIDTH (CVA6Cfg.DCACHE_TAG_WIDTH + 1),
-        .BYTE_ACCESS(0),
-        .TECHNO_CUT (CVA6Cfg.TechnoCut),
-        .NUM_WORDS  (CVA6Cfg.DCACHE_NUM_WORDS)
-    ) i_tag_sram (
-        .clk_i  (clk_i),
-        .rst_ni (rst_ni),
-        .req_i  (vld_req[i]),
-        .we_i   (vld_we),
-        .addr_i (vld_addr),
-        .wuser_i('0),
-        .wdata_i({vld_wdata[i], wr_cl_tag_i}),
-        .be_i   ('1),
-        .ruser_o(),
-        .rdata_o(vld_tag_rdata[i])
-    );
-  end
+      // Tag RAM
+      sram_cache #(
+          // tag + valid bit
+          .DATA_WIDTH (CVA6Cfg.DCACHE_TAG_WIDTH + 1),
+          .BYTE_ACCESS(0),
+          .TECHNO_CUT (CVA6Cfg.TechnoCut),
+          .NUM_WORDS  (CVA6Cfg.DCACHE_NUM_WORDS)
+      ) i_tag_sram (
+          .clk_i  (clk_i),
+          .rst_ni (rst_ni),
+          .req_i  (vld_req[i]),
+          .we_i   (vld_we),
+          .addr_i (vld_addr),
+          .wuser_i('0),
+          .wdata_i({vld_wdata[i], wr_cl_tag_i}),
+          .be_i   ('1),
+          .ruser_o(),
+          .rdata_o(vld_tag_rdata[i])
+      );
+    end
+  end  // gen_standard_sram_banks
 
   always_ff @(posedge clk_i or negedge rst_ni) begin : p_regs
     if (!rst_ni) begin
@@ -413,13 +521,17 @@ module wt_cln_dcache_mem
   logic [CVA6Cfg.DCACHE_TAG_WIDTH-1:0] tag_mirror[CVA6Cfg.DCACHE_NUM_WORDS-1:0][CVA6Cfg.DCACHE_SET_ASSOC-1:0];
   logic [CVA6Cfg.DCACHE_SET_ASSOC-1:0] tag_write_duplicate_test;
 
+  // Optimized version: Eliminate runtime loop by checking vld_we first
+  // This dramatically improves simulation performance for fully associative cache (128 ways)
   always_ff @(posedge clk_i or negedge rst_ni) begin : p_mirror
     if (!rst_ni) begin
       vld_mirror <= '{default: '0};
       tag_mirror <= '{default: '0};
-    end else begin
+    end else if (vld_we) begin
+      // Only execute loop when write enable is active (rare event)
+      // This prevents the loop from running every clock cycle
       for (int i = 0; i < CVA6Cfg.DCACHE_SET_ASSOC; i++) begin
-        if (vld_req[i] & vld_we) begin
+        if (vld_req[i]) begin
           vld_mirror[vld_addr][i] <= vld_wdata[i];
           tag_mirror[vld_addr][i] <= wr_cl_tag_i;
         end

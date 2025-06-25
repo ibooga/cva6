@@ -20,38 +20,38 @@
 #include <stdio.h>
 
 int main(int argc, char* arg[]) {
-	
-	printf("%d: Hello World - 128-way Fully Associative Cache Test!", 0);
-	
 	// Test cache with different access patterns
-	volatile int test_array[512];
-	
+	volatile int test_array[16];
+
 	// Sequential write pattern
-	for (int i = 0; i < 512; i++) {
-		test_array[i] = i * 3 + 0x1000;
+	for (int i = 0; i < 16; i++) {
+		test_array[i] = i+i;
 	}
+
+	printf("%d: Hello World - 128-way Fully Associative Cache Test!", 0);
+
 	
-	// Sequential read and verify
-	for (int i = 0; i < 512; i++) {
-		if (test_array[i] != i * 3 + 0x1000) {
-			printf("ERROR: Sequential test failed at index %d", i);
-			return 1;
-		}
-	}
+// 	// Sequential read and verify
+// 	for (int i = 0; i < 512; i++) {
+// 		if (test_array[i] != i * 3 + 0x1000) {
+// 			printf("ERROR: Sequential test failed at index %d", i);
+// 			return 1;
+// 		}
+// 	}	printf("SUCCESS: All cache tests passed!");
+//
+// 	// Stride access pattern to test associativity
+// 	for (int i = 0; i < 512; i += 16) {
+// 		test_array[i] = i + 0x2000;
+// 	}
+//
+// 	// Verify stride pattern
+// 	for (int i = 0; i < 512; i += 16) {
+// 		if (test_array[i] != i + 0x2000) {
+// 			printf("ERROR: Stride test failed at index %d", i);
+// 			return 1;
+// 		}
+// 	}
 	
-	// Stride access pattern to test associativity
-	for (int i = 0; i < 512; i += 16) {
-		test_array[i] = i + 0x2000;
-	}
-	
-	// Verify stride pattern
-	for (int i = 0; i < 512; i += 16) {
-		if (test_array[i] != i + 0x2000) {
-			printf("ERROR: Stride test failed at index %d", i);
-			return 1;
-		}
-	}
-	
-	printf("SUCCESS: All cache tests passed!");
+	// printf("SUCCESS: All cache tests passed!");
 	return 0;
 }

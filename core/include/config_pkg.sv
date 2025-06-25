@@ -364,6 +364,9 @@ package config_pkg;
     int unsigned DCACHE_USER_WIDTH;
     int unsigned DCACHE_OFFSET_WIDTH;
     int unsigned DCACHE_NUM_WORDS;
+    // Flexible FA SRAM organization parameters
+    int unsigned DCACHE_FA_BANKS;
+    int unsigned DCACHE_FA_WAYS_PER_BANK;
 
     int unsigned DCACHE_MAX_TX;
 

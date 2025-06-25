@@ -22,8 +22,8 @@ package build_config_pkg;
     int unsigned NrWbPorts = (CVA6Cfg.CvxifEn || EnableAccelerator) ? 5 : 4;
 
     int unsigned ICACHE_INDEX_WIDTH = $clog2(CVA6Cfg.IcacheByteSize / CVA6Cfg.IcacheSetAssoc);
-    // Force fully associative cache: INDEX_WIDTH = 0 means 1 set with all ways
-    int unsigned DCACHE_INDEX_WIDTH = 0; // $clog2(CVA6Cfg.DcacheByteSize / CVA6Cfg.DcacheSetAssoc);
+    // FA MODE: Set INDEX_WIDTH = 0 for fully associative behavior
+    int unsigned DCACHE_INDEX_WIDTH = 0;
     int unsigned DCACHE_OFFSET_WIDTH = $clog2(CVA6Cfg.DcacheLineWidth / 8);
 
     // MMU
@@ -148,8 +148,24 @@ package build_config_pkg;
     cfg.DCACHE_USER_LINE_WIDTH = (CVA6Cfg.AxiUserWidth == 1) ? 4 : CVA6Cfg.DcacheLineWidth;
     cfg.DCACHE_USER_WIDTH = CVA6Cfg.AxiUserWidth;
     cfg.DCACHE_OFFSET_WIDTH = DCACHE_OFFSET_WIDTH;
-    // For fully associative cache (INDEX_WIDTH=0), each way has depth 1
-    cfg.DCACHE_NUM_WORDS = (DCACHE_INDEX_WIDTH == 0) ? 1 : 2 ** (DCACHE_INDEX_WIDTH - DCACHE_OFFSET_WIDTH);
+    
+    // Flexible FA SRAM organization for security and efficiency
+    if (DCACHE_INDEX_WIDTH == 0) begin
+      // Fully Associative: Use consolidated SRAM banks for efficiency
+      // Calculate optimal bank organization based on total ways
+      cfg.DCACHE_FA_BANKS = (CVA6Cfg.DcacheSetAssoc <= 8) ? 1 : 
+                           (CVA6Cfg.DcacheSetAssoc <= 32) ? 4 : 
+                           (CVA6Cfg.DcacheSetAssoc <= 64) ? 8 : 16;
+      cfg.DCACHE_FA_WAYS_PER_BANK = CVA6Cfg.DcacheSetAssoc / cfg.DCACHE_FA_BANKS;
+      cfg.DCACHE_NUM_WORDS = (CVA6Cfg.DcacheSetAssoc <= 16) ? 4 :  // Small caches: more depth
+                            (CVA6Cfg.DcacheSetAssoc <= 64) ? 8 :  // Medium caches: balanced
+                                                             16;  // Large caches: deeper banks
+    end else begin
+      // Set-Associative: Standard calculation
+      cfg.DCACHE_NUM_WORDS = 2 ** (DCACHE_INDEX_WIDTH - DCACHE_OFFSET_WIDTH);
+      cfg.DCACHE_FA_BANKS = 1;  // Not used in set-associative mode  
+      cfg.DCACHE_FA_WAYS_PER_BANK = CVA6Cfg.DcacheSetAssoc;
+    end
 
     cfg.DCACHE_MAX_TX = unsigned'(2 ** CVA6Cfg.MemTidWidth);
 
