@@ -393,9 +393,8 @@ module wt_cln_dcache_mem
       assign fa_tag_req[way] = fa_read_req | fa_cl_write_req | fa_word_write_req;
       assign fa_tag_we[way] = (fa_cl_write_req | fa_word_write_req) & fa_write_way[way];
       
-      // Ultra-conservative data access: Only for writes, no data reads for now
-      // This tests if the FA cache can work with tag-only operations
-      assign fa_data_req[way] = (fa_cl_write_req & fa_write_way[way]) |
+      // Simplified FA Access: Enable reads for all requests - rely on 8-way limit for performance
+      assign fa_data_req[way] = fa_read_req | (fa_cl_write_req & fa_write_way[way]) |
                                 (fa_word_write_req & fa_write_way[way]);
       assign fa_data_we[way] = (fa_cl_write_req & fa_write_way[way]) | (fa_word_write_req & fa_write_way[way]);
       
@@ -472,8 +471,8 @@ module wt_cln_dcache_mem
     // Map FA cache lines to bank interface for compatibility
     for (genvar bank_word = 0; bank_word < DCACHE_NUM_BANKS; bank_word++) begin : gen_fa_read_map
       for (genvar way = 0; way < CVA6Cfg.DCACHE_SET_ASSOC; way++) begin : gen_fa_way_read
-        // For now, return zero data since we're not reading from data SRAMs
-        assign bank_rdata[bank_word][way] = '0; // TODO: fa_data_rdata[way][bank_word*CVA6Cfg.XLEN +: CVA6Cfg.XLEN];
+        // Extract correct word from cache line read from SRAM
+        assign bank_rdata[bank_word][way] = fa_data_rdata[way][bank_word*CVA6Cfg.XLEN +: CVA6Cfg.XLEN];
       end
     end
     
