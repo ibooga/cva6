@@ -328,12 +328,11 @@ module wt_cln_dcache_mem
     logic [CVA6Cfg.DCACHE_FA_BANKS-1:0][CVA6Cfg.DCACHE_FA_WAYS_PER_BANK*(CVA6Cfg.DCACHE_TAG_WIDTH+1)-1:0] fa_tag_wdata;
     logic [CVA6Cfg.DCACHE_FA_BANKS-1:0][CVA6Cfg.DCACHE_FA_WAYS_PER_BANK*(CVA6Cfg.DCACHE_TAG_WIDTH+1)-1:0] fa_tag_rdata;
     
-    // Address mapping for FA mode - use word offset for SRAM addressing
+    // Address mapping for FA mode - always use address 0
     logic [$clog2(CVA6Cfg.DCACHE_NUM_WORDS)-1:0] fa_sram_addr;
-    // For FA: use cacheline word offset since all ways are checked in parallel
-    assign fa_sram_addr = (CVA6Cfg.DCACHE_NUM_WORDS > 1) ? 
-                         bank_off_d[CVA6Cfg.DCACHE_OFFSET_WIDTH-1:CVA6Cfg.XLEN_ALIGN_BYTES] : 
-                         '0; // Use offset for SRAM addressing in FA mode
+    // For FA: all ways are accessed at the same address (0) since there's no index
+    // Each way stores exactly one cache line
+    assign fa_sram_addr = '0; // FA mode: constant address for all accesses
     
     // Generate consolidated SRAM banks
     for (genvar bank = 0; bank < CVA6Cfg.DCACHE_FA_BANKS; bank++) begin : gen_fa_bank
@@ -387,7 +386,7 @@ module wt_cln_dcache_mem
       assign fa_tag_addr[bank] = fa_sram_addr;
     end
     
-    // FA data/tag reconstruction for compatibility
+    // FA data/tag reconstruction for compatibility with existing interface
     for (genvar way = 0; way < CVA6Cfg.DCACHE_SET_ASSOC; way++) begin : gen_fa_way_mapping
       localparam int bank_id = way / CVA6Cfg.DCACHE_FA_WAYS_PER_BANK;
       localparam int way_in_bank = way % CVA6Cfg.DCACHE_FA_WAYS_PER_BANK;
@@ -396,19 +395,29 @@ module wt_cln_dcache_mem
       localparam int tag_start_bit = way_in_bank * (CVA6Cfg.DCACHE_TAG_WIDTH + 1);
       localparam int tag_end_bit = (way_in_bank + 1) * (CVA6Cfg.DCACHE_TAG_WIDTH + 1) - 1;
       
-      // Map FA SRAM outputs to existing interfaces - all banks share same data
-      for (genvar bank_word = 0; bank_word < DCACHE_NUM_BANKS; bank_word++) begin : gen_fa_data_mapping
-        assign bank_rdata[bank_word][way] = fa_data_rdata[bank_id][way_end_bit:way_start_bit];
-        
-        assign fa_data_wdata[bank_id][way_end_bit:way_start_bit] = bank_wdata[bank_word][way];
-        assign fa_data_be[bank_id][(way_in_bank+1)*(CVA6Cfg.XLEN/8)-1:(way_in_bank)*(CVA6Cfg.XLEN/8)] = bank_be[bank_word][way];
-      end
-      
       // Map FA tag outputs
       assign tag_rdata[way] = fa_tag_rdata[bank_id][tag_end_bit-1:tag_start_bit+1];
       assign rd_vld_bits_o[way] = fa_tag_rdata[bank_id][tag_start_bit];
       
       assign fa_tag_wdata[bank_id][tag_end_bit:tag_start_bit] = {wr_cl_tag_i, vld_wdata[way]};
+    end
+    
+    // Fixed FA SRAM data path mapping
+    // Map between consolidated FA banks and the expected bank_word interface
+    for (genvar bank_word = 0; bank_word < DCACHE_NUM_BANKS; bank_word++) begin : gen_fa_bank_mapping
+      for (genvar way = 0; way < CVA6Cfg.DCACHE_SET_ASSOC; way++) begin : gen_fa_way_data
+        localparam int bank_id = way / CVA6Cfg.DCACHE_FA_WAYS_PER_BANK;
+        localparam int way_in_bank = way % CVA6Cfg.DCACHE_FA_WAYS_PER_BANK;
+        localparam int way_start_bit = way_in_bank * CVA6Cfg.XLEN;
+        localparam int way_end_bit = (way_in_bank + 1) * CVA6Cfg.XLEN - 1;
+        
+        // Read path: map FA SRAM output to bank_word interface
+        assign bank_rdata[bank_word][way] = fa_data_rdata[bank_id][way_end_bit:way_start_bit];
+        
+        // Write path: map bank_word interface to FA SRAM input
+        assign fa_data_wdata[bank_id][way_end_bit:way_start_bit] = bank_wdata[bank_word][way];
+        assign fa_data_be[bank_id][(way_in_bank+1)*(CVA6Cfg.XLEN/8)-1:(way_in_bank)*(CVA6Cfg.XLEN/8)] = bank_be[bank_word][way];
+      end
     end
     
   end else begin : gen_standard_sram_banks

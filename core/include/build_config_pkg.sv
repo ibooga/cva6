@@ -157,9 +157,8 @@ package build_config_pkg;
                            (CVA6Cfg.DcacheSetAssoc <= 32) ? 4 : 
                            (CVA6Cfg.DcacheSetAssoc <= 64) ? 8 : 16;
       cfg.DCACHE_FA_WAYS_PER_BANK = CVA6Cfg.DcacheSetAssoc / cfg.DCACHE_FA_BANKS;
-      cfg.DCACHE_NUM_WORDS = (CVA6Cfg.DcacheSetAssoc <= 16) ? 4 :  // Small caches: more depth
-                            (CVA6Cfg.DcacheSetAssoc <= 64) ? 8 :  // Medium caches: balanced
-                                                             16;  // Large caches: deeper banks
+      // In FA mode, each way stores exactly one cache line (no index bits)
+      cfg.DCACHE_NUM_WORDS = 1;  // FA: one entry per way
     end else begin
       // Set-Associative: Standard calculation
       cfg.DCACHE_NUM_WORDS = 2 ** (DCACHE_INDEX_WIDTH - DCACHE_OFFSET_WIDTH);
