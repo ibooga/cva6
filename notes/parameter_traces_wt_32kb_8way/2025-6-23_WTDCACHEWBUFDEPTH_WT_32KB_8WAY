@@ -1,0 +1,102 @@
+CVA6ConfigWtDcacheWbufDepth = 8 Signal Flow Tree (32KB 8-way Configuration)
+===========================================================================
+
+1. CONFIGURATION PHASE (cv32a6_imac_sv32_config_pkg.sv)
+   └── localparam CVA6ConfigWtDcacheWbufDepth = 8;
+       └── cva6_cfg.'{ WtDcacheWbufDepth: int'(CVA6ConfigWtDcacheWbufDepth) }
+
+2. BUILD/DERIVATION PHASE (build_config_pkg.sv)
+   └── CVA6Cfg.WtDcacheWbufDepth = 8
+       └── cfg.WtDcacheWbufDepth = CVA6Cfg.WtDcacheWbufDepth = 8
+
+3. MODULE INSTANTIATION PHASE
+   └── std_cache_subsystem (core/cache_subsystem/std_cache_subsystem.sv)
+       └── wt_dcache (core/cache_subsystem/wt_dcache.sv)
+           └── wt_dcache_wbuffer (core/cache_subsystem/wt_dcache_wbuffer.sv)
+               └── parameter DEPTH = CONFIG.WtDcacheWbufDepth = 8
+
+4. WRITE BUFFER INSTANTIATION
+   └── Write Buffer Implementation (wt_dcache_wbuffer.sv):
+       ├── Buffer depth: 8 entries
+       ├── Each entry stores:
+       │   ├── Address: PLEN bits (32 bits)
+       │   ├── Data: DCACHE_LINE_WIDTH bits (128 bits)
+       │   ├── Byte enables: DCACHE_LINE_WIDTH/8 bits (16 bits)
+       │   ├── Valid bit: 1 bit
+       │   └── Total per entry: ~177 bits
+       └── FIFO organization for in-order writes
+
+5. WRITE-THROUGH OPERATION (32KB Cache)
+   └── WT Cache Write Flow:
+       ├── Write hit in 32KB cache:
+       │   ├── Update cache line (1 of 2048)
+       │   ├── Allocate write buffer entry
+       │   └── CPU continues execution
+       ├── Write miss handling:
+       │   ├── No allocate on write miss
+       │   ├── Direct to write buffer
+       │   └── No cache update needed
+       └── Buffer full: CPU stalls
+
+6. PERFORMANCE CHARACTERISTICS
+   └── 8-Entry Buffer with 32KB Cache:
+       ├── Absorbs write bursts effectively
+       ├── Hides AXI write latency
+       ├── Sufficient for most workloads
+       ├── Good match for 32KB cache size
+       └── Prevents write-induced stalls
+
+7. AXI INTERFACE UTILIZATION
+   └── Write Buffer to AXI:
+       ├── Up to 8 outstanding writes
+       ├── AXI write channel pipelining
+       ├── ID-based transaction tracking
+       ├── Efficient bus utilization
+       └── Overlapped write operations
+
+8. WRITE PATTERNS SUPPORT
+   └── Workload Characteristics:
+       ├── Sequential writes: Fully absorbed
+       ├── Scattered writes: 8 unique addresses
+       ├── Burst writes: Buffer prevents stalls
+       ├── Mixed read/write: Write latency hidden
+       └── Suitable for general-purpose code
+
+9. BUFFER MANAGEMENT LOGIC
+   └── Control Mechanisms:
+       ├── Head/tail pointers for FIFO
+       ├── Full/empty status flags
+       ├── Address comparison for merging
+       ├── Flow control to CPU pipeline
+       └── AXI response tracking
+
+10. MEMORY CONSISTENCY
+    └── Write Ordering with 8 Entries:
+        ├── Strict in-order completion
+        ├── TSO memory model support
+        ├── FENCE drains all 8 entries
+        ├── Address dependency checks
+        └── Coherent with 32KB cache
+
+11. SIZING ANALYSIS (32KB Cache Context)
+    └── 8-Entry Depth Rationale:
+        ├── Cache hit rate reduces write pressure
+        ├── 32KB absorbs temporal writes
+        ├── 8 entries handle remaining traffic
+        ├── Balanced area vs performance
+        └── Proven in similar designs
+
+12. RESOURCE UTILIZATION
+    └── Hardware Cost:
+        ├── 8 × 177 bits ≈ 1416 bits storage
+        ├── Compare logic for 8 addresses
+        ├── FIFO control logic
+        ├── AXI interface logic
+        └── ~2KB total area (small vs 32KB cache)
+
+KEY RELATIONSHIPS:
+- WtDcacheWbufDepth = 8 provides write latency hiding
+- Essential for WT cache performance
+- Complements 32KB cache for write absorption
+- Standard depth for embedded processors
+- Prevents CPU stalls on write sequences

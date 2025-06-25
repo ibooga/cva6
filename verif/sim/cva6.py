@@ -738,8 +738,8 @@ def parse_args(cwd):
                       help="Address that privileged CSR test writes to at EOT")
   parser.add_argument("--iss_opts", type=str, default="",
                       help="Any ISS command line arguments")
-  parser.add_argument("--iss_timeout", type=int, default=500,
-                      help="ISS sim timeout limit in seconds")
+  parser.add_argument("--iss_timeout", type=int, default=1500,
+                      help="ISS sim timeout limit in seconds (increased for fully associative cache)")
   parser.add_argument("--iss_yaml", type=str, default="",
                       help="ISS setting YAML")
   parser.add_argument("--simulator_yaml", type=str, default="",

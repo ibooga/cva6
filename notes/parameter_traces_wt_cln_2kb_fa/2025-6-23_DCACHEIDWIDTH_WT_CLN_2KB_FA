@@ -1,0 +1,111 @@
+CVA6ConfigDcacheIdWidth = 3 Signal Flow Tree
+============================================
+
+1. CONFIGURATION PHASE (cv32a6_imac_sv32_config_pkg.sv)
+   └── localparam CVA6ConfigDcacheIdWidth = 3;
+       └── cva6_cfg.'{ DcacheIdWidth: int'(CVA6ConfigDcacheIdWidth) }
+
+2. BUILD/DERIVATION PHASE (build_config_pkg.sv)
+   └── CVA6Cfg.DcacheIdWidth = 3
+       └── cfg.DcacheIdWidth = CVA6Cfg.DcacheIdWidth = 3
+
+3. MODULE INSTANTIATION PHASE
+   └── std_cache_subsystem (core/cache_subsystem/std_cache_subsystem.sv)
+       └── wt_cln_dcache_ctrler (core/cache_subsystem/wt_cln_dcache_ctrl.sv)
+           └── parameter DcacheIdWidth = CONFIG.DcacheIdWidth = 3
+
+4. AXI TRANSACTION ID USAGE
+   └── wt_cln_axi_adapter (core/cache_subsystem/wt_cln_axi_adapter.sv)
+       ├── AXI ID generation:
+       │   ├── ARID[DcacheIdWidth-1:0] → ARID[2:0] (3-bit read ID)
+       │   ├── AWID[DcacheIdWidth-1:0] → AWID[2:0] (3-bit write ID)
+       │   └── ID space: 2^3 = 8 unique transaction IDs
+       │
+       └── Transaction tracking:
+           ├── Outstanding read tracking: Up to 8 concurrent reads
+           ├── Outstanding write tracking: Up to 8 concurrent writes
+           └── Response matching: RID/BID used for transaction completion
+
+5. OUTSTANDING TRANSACTION MANAGEMENT
+   └── Transaction ID Allocation:
+       ├── Read transactions:
+       │   ├── ID pool: 0-7 for read requests
+       │   ├── ID allocation on cache miss
+       │   ├── ID tracking for response matching
+       │   └── ID deallocation on RVALID response
+       ├── Write transactions:
+       │   ├── ID pool: 0-7 for write requests
+       │   ├── ID allocation from write buffer
+       │   ├── ID tracking for write completion
+       │   └── ID deallocation on BVALID response
+       └── ID reuse: IDs recycled after transaction completion
+
+6. CACHE MISS HANDLING
+   └── Read Miss Transaction Flow:
+       ├── Cache miss detection
+       ├── AXI transaction ID allocation (0-7)
+       ├── AXI read request with allocated ID
+       ├── Outstanding transaction tracking
+       ├── AXI read response with matching RID
+       └── Transaction completion and ID release
+
+7. WRITE BUFFER INTEGRATION
+   └── Write Transaction Management:
+       ├── Write buffer entry gets allocated ID
+       ├── AXI write transaction uses entry ID
+       ├── Write completion tracking via BID
+       ├── Write buffer entry retirement
+       └── ID available for reuse
+
+8. PERFORMANCE IMPLICATIONS
+   └── DcacheIdWidth = 3 (8 IDs) Impact:
+       ├── Advantages:
+       │   ├── Up to 8 concurrent read transactions
+       │   ├── Up to 8 concurrent write transactions  
+       │   ├── Good parallelism for memory accesses
+       │   └── Adequate for most cache workloads
+       ├── Limitations:
+       │   ├── ID exhaustion on high miss rates
+       │   ├── Transaction stalls when all IDs allocated
+       │   └── Memory controller ID capacity dependent
+       └── Alternative sizing:
+           ├── Smaller (2 bits): 4 IDs, more blocking
+           └── Larger (4 bits): 16 IDs, more parallelism
+
+9. MEMORY CONTROLLER INTERFACE
+   └── AXI Infrastructure Requirements:
+       ├── Memory controller must support 3-bit AXI IDs
+       ├── Response routing based on transaction ID
+       ├── Interleaved response handling capability
+       └── ID-based transaction completion matching
+
+10. RESOURCE UTILIZATION
+    └── Hardware Cost (3-bit IDs):
+        ├── ID tracking tables: 8 entries for reads + 8 for writes
+        ├── Outstanding transaction state: Address, control per ID
+        ├── ID allocation logic: 3-bit ID generation/management
+        ├── Response matching logic: RID/BID comparison
+        └── Moderate hardware overhead for tracking
+
+11. PROTOCOL COMPLIANCE
+    └── AXI4 Protocol Considerations:
+        ├── Transaction ID must be preserved through interconnect
+        ├── Responses must include matching ID
+        ├── Out-of-order completion supported
+        ├── ID-based hazard detection
+        └── Proper ID lifecycle management
+
+12. CACHE CONTROLLER STATE MACHINE
+    └── ID-based State Tracking:
+        ├── ID allocation state
+        ├── Outstanding transaction state per ID
+        ├── Response handling state
+        ├── ID deallocation state
+        └── ID exhaustion handling
+
+KEY RELATIONSHIPS:
+- DcacheIdWidth = 3 enables 8 concurrent AXI transactions (2^3 = 8)
+- Supports parallel cache miss handling and write buffer operations
+- Balances transaction parallelism vs. hardware complexity
+- Critical for cache performance under high miss rates
+- Requires AXI infrastructure support for 3-bit transaction IDs

@@ -1,0 +1,80 @@
+CVA6ConfigDcacheSetAssoc = 8 Signal Flow Tree (32KB 8-way Configuration)
+========================================================================
+
+1. CONFIGURATION PHASE (cv32a6_imac_sv32_config_pkg.sv)
+   └── localparam CVA6ConfigDcacheSetAssoc = 8;
+       └── cva6_cfg.'{ DcacheSetAssoc: unsigned'(CVA6ConfigDcacheSetAssoc) }
+
+2. BUILD/DERIVATION PHASE (build_config_pkg.sv)
+   └── CVA6Cfg.DcacheSetAssoc = 8
+       ├── DCACHE_SET_ASSOC = CVA6Cfg.DcacheSetAssoc = 8
+       ├── DCACHE_SET_ASSOC_WIDTH calculation:
+       │   └── CVA6Cfg.DcacheSetAssoc > 1 ? $clog2(CVA6Cfg.DcacheSetAssoc) : CVA6Cfg.DcacheSetAssoc
+       │       └── $clog2(8) = 3 bits
+       │
+       └── Used in INDEX_WIDTH calculation:
+           └── $clog2(CVA6Cfg.DcacheByteSize / CVA6Cfg.DcacheSetAssoc)
+               └── $clog2(32768 / 8) = $clog2(4096) = 12 bits
+
+3. MODULE INSTANTIATION PHASE
+   └── std_cache_subsystem (core/cache_subsystem/std_cache_subsystem.sv)
+       └── wt_dcache (core/cache_subsystem/wt_dcache.sv)
+           └── wt_dcache_mem (core/cache_subsystem/wt_dcache_mem.sv)
+               └── parameter DCACHE_SET_ASSOC = CONFIG.DCACHE_SET_ASSOC = 8
+
+4. MEMORY ARRAY GENERATION
+   └── SRAM Array Generation (wt_dcache_mem.sv)
+       └── for (genvar i = 0; i < DCACHE_SET_ASSOC; i++)
+           ├── Generate 8 SRAM instances (one per way)
+           ├── Each SRAM: NUM_WORDS = 256, DATA_WIDTH = DCACHE_LINE_WIDTH
+           └── Array indexing: cl_data_way[i], cl_tag_way[i], cl_vld_way[i]
+
+5. ASSOCIATIVITY LOGIC IMPACT
+   └── Way Selection and Comparison:
+       ├── Tag comparison across 8 ways in parallel
+       ├── Hit detection: hit_way[DCACHE_SET_ASSOC-1:0] → hit_way[7:0]
+       ├── LRU replacement policy across 8 ways:
+       │   └── plru_tree_i #(.ENTRIES(DCACHE_SET_ASSOC))
+       │       └── 8-way PLRU tree for replacement selection
+       │
+       └── Way multiplexing:
+           ├── rd_data_way[7:0] selection for read hits
+           └── wr_way_sel[7:0] for write operations
+
+6. HARDWARE COMPLEXITY
+   └── 8-way Associative Implementation:
+       ├── 8 tag comparators (parallel comparison)
+       ├── 8:1 data multiplexer for read selection
+       ├── 3-level PLRU tree (log2(8) = 3)
+       ├── 8 valid bit checks
+       └── Moderate hardware overhead
+
+7. SIGNAL WIDTH IMPACT
+   └── Associativity-related signals:
+       ├── hit_way[DCACHE_SET_ASSOC-1:0] → hit_way[7:0]
+       ├── way_sel[DCACHE_SET_ASSOC_WIDTH-1:0] → way_sel[2:0]
+       ├── plru_way[DCACHE_SET_ASSOC_WIDTH-1:0] → plru_way[2:0]
+       └── cl_vld_way[DCACHE_SET_ASSOC-1:0] → cl_vld_way[7:0]
+
+8. PERFORMANCE CHARACTERISTICS
+   └── 8-way Associativity Benefits:
+       ├── Good conflict miss reduction
+       ├── Reasonable hardware complexity
+       ├── Fast way selection (3-bit encoding)
+       ├── Efficient PLRU implementation
+       └── Industry-standard configuration
+
+9. COMPARISON WITH FA CACHE
+   └── 8-way vs Fully Associative:
+       ├── 8-way: 256 sets × 8 ways = 2048 lines
+       ├── FA would be: 1 set × 2048 ways
+       ├── 8-way has much lower hardware complexity
+       ├── 8-way has slightly higher conflict misses
+       └── 8-way has faster access time
+
+KEY RELATIONSHIPS:
+- DcacheSetAssoc = 8 creates conventional 8-way set-associative cache
+- Balanced design: good hit rate without excessive hardware
+- Each way contains 4KB (32KB / 8 ways)
+- Way selection requires only 3 bits
+- Standard configuration proven in many designs

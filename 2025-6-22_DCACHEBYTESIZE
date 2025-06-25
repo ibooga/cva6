@@ -1,0 +1,51 @@
+CVA6ConfigDcacheByteSize = 2048 Signal Flow Tree
+================================================
+
+1. CONFIGURATION PHASE (cv32a6_imac_sv32_config_pkg.sv)
+   └── localparam CVA6ConfigDcacheByteSize = 2048;
+       └── cva6_cfg.'{ DcacheByteSize: unsigned'(CVA6ConfigDcacheByteSize) }
+
+2. BUILD/DERIVATION PHASE (build_config_pkg.sv)
+   └── CVA6Cfg.DcacheByteSize = 2048
+       ├── DCACHE_INDEX_WIDTH calculation:
+       │   └── $clog2(CVA6Cfg.DcacheByteSize / CVA6Cfg.DcacheSetAssoc)
+       │       └── $clog2(2048 / 128) = $clog2(16) = 4
+       │       └── BUT: Forced to 0 for FA cache (line 27)
+       │
+       └── DCACHE_NUM_WORDS calculation:
+           └── (DCACHE_INDEX_WIDTH == 0) ? 1 : 2 ** (DCACHE_INDEX_WIDTH - DCACHE_OFFSET_WIDTH)
+               └── Since INDEX_WIDTH = 0: NUM_WORDS = 1
+
+3. MODULE INSTANTIATION PHASE
+   └── std_cache_subsystem (core/cache_subsystem/std_cache_subsystem.sv)
+       └── wt_cln_dcache_ctrler (core/cache_subsystem/wt_cln_dcache_ctrl.sv)
+           └── wt_cln_dcache_mem (core/cache_subsystem/wt_cln_dcache_mem.sv)
+               └── parameter DCACHE_CL_IDX_WIDTH = CONFIG.DCACHE_INDEX_WIDTH = 0
+
+4. SIGNAL WIDTH IMPACT
+   └── DCACHE_CL_IDX_WIDTH = 0
+       ├── rd_idx_i [DCACHE_CL_IDX_WIDTH-1:0] → [0:0] (1-bit signal)
+       ├── wr_cl_idx_i [DCACHE_CL_IDX_WIDTH-1:0] → [0:0] (1-bit signal)
+       └── cl_index [DCACHE_CL_IDX_WIDTH-1:0] → [0:0] (1-bit signal)
+
+5. MEMORY ORGANIZATION IMPACT
+   └── SRAM Instantiation (wt_cln_dcache_mem.sv:89-103)
+       └── for (genvar i = 0; i < DCACHE_SET_ASSOC; i++)
+           └── sram #(.NUM_WORDS(DCACHE_NUM_WORDS))
+               └── NUM_WORDS = 1 (single entry per way)
+               └── 128 SRAM instances (one per way)
+               └── Each SRAM has depth = 1 (fully associative)
+
+6. FUNCTIONAL IMPACT
+   └── Address Decoding:
+       ├── All accesses use index 0 (single set)
+       ├── Tag comparison happens across all 128 ways simultaneously
+       └── Arbiter optimization:
+           └── rd_wr_address_conflict = (DCACHE_CL_IDX_WIDTH == 0) ? 1'b0 : 1'b1
+               └── In FA mode: Never block reads (no index conflicts possible)
+
+KEY RELATIONSHIPS:
+- DcacheByteSize (2048) determines total cache capacity
+- With DcacheSetAssoc = 128, each way holds 16 bytes (one cache line)
+- FA configuration: INDEX_WIDTH = 0 → NUM_WORDS = 1 → All ways in single set
+- Performance impact: All 128 ways must be checked on every access

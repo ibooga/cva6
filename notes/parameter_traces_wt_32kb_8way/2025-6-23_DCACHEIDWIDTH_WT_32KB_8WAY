@@ -1,0 +1,104 @@
+CVA6ConfigDcacheIdWidth = 3 Signal Flow Tree (32KB 8-way Configuration)
+=======================================================================
+
+1. CONFIGURATION PHASE (cv32a6_imac_sv32_config_pkg.sv)
+   └── localparam CVA6ConfigDcacheIdWidth = 3;
+       └── cva6_cfg.'{ DcacheIdWidth: int'(CVA6ConfigDcacheIdWidth) }
+
+2. BUILD/DERIVATION PHASE (build_config_pkg.sv)
+   └── CVA6Cfg.DcacheIdWidth = 3
+       └── cfg.DcacheIdWidth = CVA6Cfg.DcacheIdWidth = 3
+
+3. MODULE INSTANTIATION PHASE
+   └── std_cache_subsystem (core/cache_subsystem/std_cache_subsystem.sv)
+       └── wt_dcache (core/cache_subsystem/wt_dcache.sv)
+           └── wt_axi_adapter (core/cache_subsystem/wt_axi_adapter.sv)
+               └── parameter DcacheIdWidth = CONFIG.DcacheIdWidth = 3
+
+4. AXI TRANSACTION ID USAGE
+   └── wt_axi_adapter ID Management:
+       ├── AXI ID width: 3 bits
+       ├── ID space: 2^3 = 8 unique IDs (0-7)
+       ├── Read IDs: ARID[2:0]
+       ├── Write IDs: AWID[2:0]
+       └── Separate ID pools for reads/writes
+
+5. OUTSTANDING TRANSACTION SUPPORT
+   └── Transaction Parallelism:
+       ├── Up to 8 concurrent read misses
+       ├── Up to 8 concurrent write buffer entries
+       ├── Total: 16 simultaneous memory operations
+       ├── Good match for 32KB cache capacity
+       └── Prevents ID exhaustion
+
+6. CACHE MISS HANDLING (32KB Cache)
+   └── Read Miss Transaction Flow:
+       ├── Miss in 32KB cache (lower rate)
+       ├── Allocate ID from pool (0-7)
+       ├── Issue AXI read with ID
+       ├── Track pending fill by ID
+       ├── Match response RID for completion
+       └── Release ID for reuse
+
+7. WRITE BUFFER INTEGRATION
+   └── Write Transaction Management:
+       ├── 8 write buffer entries
+       ├── Each entry gets unique ID
+       ├── Parallel write transactions
+       ├── BID matching for completion
+       └── Perfect match: 8 IDs for 8 entries
+
+8. PERFORMANCE IMPLICATIONS (32KB Cache)
+   └── ID Width = 3 Benefits:
+       ├── Sufficient for typical miss rates
+       ├── 32KB cache has lower miss rate
+       ├── 8 IDs rarely exhausted
+       ├── Good hardware/performance balance
+       └── Supports memory-level parallelism
+
+9. MEMORY CONTROLLER INTERFACE
+   └── AXI Infrastructure:
+       ├── 3-bit ID routing logic
+       ├── 8-entry transaction tables
+       ├── Response demultiplexing
+       ├── Out-of-order completion support
+       └── Standard AXI compliance
+
+10. RESOURCE UTILIZATION
+    └── Hardware Cost (3-bit IDs):
+        ├── 8-entry ID tracking tables
+        ├── 3-bit comparators for matching
+        ├── Modest area overhead
+        ├── Efficient for 32KB cache
+        └── Good cost/benefit ratio
+
+11. TRANSACTION SCENARIOS (32KB Cache)
+    └── Typical Operation:
+        ├── High hit rate reduces ID pressure
+        ├── Scattered misses use different IDs
+        ├── Write buffer smooths write traffic
+        ├── Rarely hit ID limit
+        └── Efficient memory utilization
+
+12. SCALABILITY CONSIDERATIONS
+    └── 3-bit ID Width Analysis:
+        ├── Adequate for single-core
+        ├── Supports moderate miss rates
+        ├── Good for 32KB cache systems
+        ├── May limit extreme scenarios
+        └── Standard for embedded designs
+
+13. DEADLOCK PREVENTION
+    └── ID Management Safety:
+        ├── Separate read/write ID pools
+        ├── No circular dependencies
+        ├── Forward progress guaranteed
+        ├── Timeout mechanisms available
+        └── Robust operation
+
+KEY RELATIONSHIPS:
+- DcacheIdWidth = 3 enables 8 concurrent transactions
+- Perfect match for 8-entry write buffer
+- Sufficient for 32KB cache miss rates
+- Enables memory-level parallelism
+- Standard configuration for embedded AXI systems

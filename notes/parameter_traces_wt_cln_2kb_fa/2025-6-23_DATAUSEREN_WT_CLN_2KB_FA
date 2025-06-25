@@ -1,0 +1,96 @@
+CVA6ConfigDataUserEn = 0 Signal Flow Tree
+=========================================
+
+1. CONFIGURATION PHASE (cv32a6_imac_sv32_config_pkg.sv)
+   └── localparam CVA6ConfigDataUserEn = 0;
+       └── cva6_cfg.'{ DataUserEn: unsigned'(CVA6ConfigDataUserEn) }
+
+2. BUILD/DERIVATION PHASE (build_config_pkg.sv)
+   └── CVA6Cfg.DataUserEn = 0
+       ├── cfg.DATA_USER_EN = CVA6Cfg.DataUserEn = 0
+       ├── cfg.AXI_USER_EN = CVA6Cfg.DataUserEn | CVA6Cfg.FetchUserEn
+       │   └── AXI_USER_EN = 0 | 0 = 0 (assuming FetchUserEn = 0)
+       └── cfg.AxiUserWidth = CVA6Cfg.AxiUserWidth (but user signals disabled)
+
+3. MODULE INSTANTIATION PHASE
+   └── std_cache_subsystem (core/cache_subsystem/std_cache_subsystem.sv)
+       └── wt_cln_dcache_ctrler (core/cache_subsystem/wt_cln_dcache_ctrl.sv)
+           └── parameter DATA_USER_EN = CONFIG.DATA_USER_EN = 0
+
+4. AXI INTERFACE IMPACT
+   └── wt_cln_axi_adapter (core/cache_subsystem/wt_cln_axi_adapter.sv)
+       ├── AXI USER signal generation:
+       │   ├── If DATA_USER_EN = 1: AXI user signals driven with metadata
+       │   └── If DATA_USER_EN = 0: (CURRENT CONFIGURATION)
+       │       ├── AXI user signals tied to default values
+       │       ├── AWUSER, ARUSER not used for metadata
+       │       └── Simplified AXI interface
+       │
+       └── Cache line user data:
+           ├── If DATA_USER_EN = 1: User bits stored with cache lines
+           └── If DATA_USER_EN = 0: No user data storage
+
+5. CACHE LINE STORAGE IMPACT
+   └── wt_cln_dcache_mem (core/cache_subsystem/wt_cln_dcache_mem.sv)
+       ├── If DATA_USER_EN = 1:
+       │   ├── Additional SRAM for user data storage
+       │   ├── User data width: DCACHE_USER_LINE_WIDTH
+       │   └── User data stored alongside cache line data
+       └── If DATA_USER_EN = 0: (CURRENT CONFIGURATION)
+           ├── No user data SRAM instantiated
+           ├── Reduced memory overhead
+           └── Simplified cache line structure
+
+6. CPU INTERFACE IMPACT
+   └── Data Cache Request Interface:
+       ├── If DATA_USER_EN = 1:
+       │   ├── req_port_i includes user data field
+       │   ├── resp_port_o includes user data field
+       │   └── User metadata propagated from CPU
+       └── If DATA_USER_EN = 0: (CURRENT CONFIGURATION)
+           ├── req_port_i.user tied to default
+           ├── resp_port_o.user tied to default
+           └── No user metadata handling
+
+7. MEMORY OVERHEAD IMPACT
+   └── Storage Requirements (DATA_USER_EN = 0):
+       ├── Cache line data: 128 bits per line
+       ├── Cache line tag: (PLEN - INDEX_WIDTH) bits
+       ├── Cache line valid: 1 bit per line
+       ├── No user data storage required
+       └── Reduced SRAM instantiation
+
+8. PERFORMANCE IMPLICATIONS
+   └── Impact of DATA_USER_EN = 0:
+       ├── Reduced cache memory footprint
+       ├── Simplified cache controller logic
+       ├── No user data lookup overhead
+       ├── Faster cache line allocation
+       └── Lower power consumption
+
+9. PROTOCOL COMPLIANCE
+   └── AXI Protocol Handling:
+       ├── AXI USER signals present but unused
+       ├── Compatible with AXI infrastructure
+       ├── USER signals driven to safe default values
+       └── No protocol violations
+
+10. USE CASE SCENARIOS
+    └── DATA_USER_EN = 0 appropriate for:
+        ├── Basic cache functionality without metadata
+        ├── Memory-constrained systems
+        ├── Performance-critical applications
+        └── Systems without user data requirements
+
+    └── DATA_USER_EN = 1 would be used for:
+        ├── Cache coherency protocols requiring metadata
+        ├── Security extensions (TrustZone, etc.)
+        ├── Debug/trace information
+        └── Custom user-defined metadata
+
+KEY RELATIONSHIPS:
+- DataUserEn = 0 disables AXI user signal generation and storage
+- Reduces cache memory overhead by eliminating user data storage
+- Simplifies cache controller logic and AXI interface
+- AXI_USER_EN combines DataUserEn and FetchUserEn flags
+- Suitable for basic cache functionality without metadata requirements

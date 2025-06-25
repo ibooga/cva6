@@ -309,56 +309,53 @@ module wt_cln_dcache_mem
 
   logic [CVA6Cfg.DCACHE_TAG_WIDTH:0] vld_tag_rdata[CVA6Cfg.DCACHE_SET_ASSOC-1:0];
 
-  // Flexible FA SRAM Architecture for Security and Efficiency
-  if (CVA6Cfg.DCACHE_INDEX_WIDTH == 0) begin : gen_fa_sram_banks
-    // Fully Associative: Use consolidated SRAM banks
+  // Simple Full Cache Line FA Implementation 
+  if (CVA6Cfg.DCACHE_INDEX_WIDTH == 0) begin : gen_fa_simple
+    // FA implementation using full cache line storage per way
+    // This bypasses complex banking and uses simple one SRAM per way approach
     
-    // FA Data Banks - Consolidated for efficiency
-    logic [CVA6Cfg.DCACHE_FA_BANKS-1:0] fa_data_req;
-    logic [CVA6Cfg.DCACHE_FA_BANKS-1:0] fa_data_we;
-    logic [CVA6Cfg.DCACHE_FA_BANKS-1:0][$clog2(CVA6Cfg.DCACHE_NUM_WORDS)-1:0] fa_data_addr;
-    logic [CVA6Cfg.DCACHE_FA_BANKS-1:0][CVA6Cfg.DCACHE_FA_WAYS_PER_BANK*CVA6Cfg.XLEN-1:0] fa_data_wdata;
-    logic [CVA6Cfg.DCACHE_FA_BANKS-1:0][CVA6Cfg.DCACHE_FA_WAYS_PER_BANK*CVA6Cfg.XLEN-1:0] fa_data_rdata;
-    logic [CVA6Cfg.DCACHE_FA_BANKS-1:0][CVA6Cfg.DCACHE_FA_WAYS_PER_BANK*(CVA6Cfg.XLEN/8)-1:0] fa_data_be;
+    // Individual SRAM per way storing complete cache lines
+    logic [CVA6Cfg.DCACHE_SET_ASSOC-1:0] fa_data_req;
+    logic [CVA6Cfg.DCACHE_SET_ASSOC-1:0] fa_data_we;
+    logic [CVA6Cfg.DCACHE_SET_ASSOC-1:0][CVA6Cfg.DCACHE_LINE_WIDTH-1:0] fa_data_wdata;
+    logic [CVA6Cfg.DCACHE_SET_ASSOC-1:0][CVA6Cfg.DCACHE_LINE_WIDTH-1:0] fa_data_rdata;
+    logic [CVA6Cfg.DCACHE_SET_ASSOC-1:0][CVA6Cfg.DCACHE_LINE_WIDTH/8-1:0] fa_data_be;
     
-    // FA Tag Banks - Consolidated for efficiency  
-    logic [CVA6Cfg.DCACHE_FA_BANKS-1:0] fa_tag_req;
-    logic [CVA6Cfg.DCACHE_FA_BANKS-1:0] fa_tag_we;
-    logic [CVA6Cfg.DCACHE_FA_BANKS-1:0][$clog2(CVA6Cfg.DCACHE_NUM_WORDS)-1:0] fa_tag_addr;
-    logic [CVA6Cfg.DCACHE_FA_BANKS-1:0][CVA6Cfg.DCACHE_FA_WAYS_PER_BANK*(CVA6Cfg.DCACHE_TAG_WIDTH+1)-1:0] fa_tag_wdata;
-    logic [CVA6Cfg.DCACHE_FA_BANKS-1:0][CVA6Cfg.DCACHE_FA_WAYS_PER_BANK*(CVA6Cfg.DCACHE_TAG_WIDTH+1)-1:0] fa_tag_rdata;
+    logic [CVA6Cfg.DCACHE_SET_ASSOC-1:0] fa_tag_req;
+    logic [CVA6Cfg.DCACHE_SET_ASSOC-1:0] fa_tag_we;
+    logic [CVA6Cfg.DCACHE_SET_ASSOC-1:0][CVA6Cfg.DCACHE_TAG_WIDTH:0] fa_tag_wdata;
+    logic [CVA6Cfg.DCACHE_SET_ASSOC-1:0][CVA6Cfg.DCACHE_TAG_WIDTH:0] fa_tag_rdata;
     
-    // Address mapping for FA mode - always use address 0
-    logic [$clog2(CVA6Cfg.DCACHE_NUM_WORDS)-1:0] fa_sram_addr;
-    // For FA: all ways are accessed at the same address (0) since there's no index
-    // Each way stores exactly one cache line
-    assign fa_sram_addr = '0; // FA mode: constant address for all accesses
+    // FA addressing - single address since no indexing
+    localparam FA_ADDR_BITS = (CVA6Cfg.DCACHE_NUM_WORDS > 1) ? $clog2(CVA6Cfg.DCACHE_NUM_WORDS) : 1;
+    logic [FA_ADDR_BITS-1:0] fa_addr;
+    assign fa_addr = '0; // Always address 0 for FA
     
-    // Generate consolidated SRAM banks
-    for (genvar bank = 0; bank < CVA6Cfg.DCACHE_FA_BANKS; bank++) begin : gen_fa_bank
-      // Data SRAM Bank
+    // Generate one SRAM per way
+    for (genvar way = 0; way < CVA6Cfg.DCACHE_SET_ASSOC; way++) begin : gen_fa_way
+      // Data SRAM storing full cache lines
       sram_cache #(
-          .DATA_WIDTH (CVA6Cfg.DCACHE_FA_WAYS_PER_BANK * CVA6Cfg.XLEN),
-          .USER_EN    (0),  // Simplified for FA mode
+          .DATA_WIDTH (CVA6Cfg.DCACHE_LINE_WIDTH),
+          .USER_EN    (0),
           .BYTE_ACCESS(1),
           .TECHNO_CUT (CVA6Cfg.TechnoCut),
           .NUM_WORDS  (CVA6Cfg.DCACHE_NUM_WORDS)
       ) i_fa_data_sram (
           .clk_i  (clk_i),
           .rst_ni (rst_ni),
-          .req_i  (fa_data_req[bank]),
-          .we_i   (fa_data_we[bank]),
-          .addr_i (fa_data_addr[bank]),
+          .req_i  (fa_data_req[way]),
+          .we_i   (fa_data_we[way]),
+          .addr_i (fa_addr),
           .wuser_i('0),
-          .wdata_i(fa_data_wdata[bank]),
-          .be_i   (fa_data_be[bank]),
+          .wdata_i(fa_data_wdata[way]),
+          .be_i   (fa_data_be[way]),
           .ruser_o(),
-          .rdata_o(fa_data_rdata[bank])
+          .rdata_o(fa_data_rdata[way])
       );
       
-      // Tag SRAM Bank
+      // Tag SRAM per way
       sram_cache #(
-          .DATA_WIDTH (CVA6Cfg.DCACHE_FA_WAYS_PER_BANK * (CVA6Cfg.DCACHE_TAG_WIDTH + 1)),
+          .DATA_WIDTH (CVA6Cfg.DCACHE_TAG_WIDTH + 1),
           .USER_EN    (0),
           .BYTE_ACCESS(0),
           .TECHNO_CUT (CVA6Cfg.TechnoCut),
@@ -366,57 +363,36 @@ module wt_cln_dcache_mem
       ) i_fa_tag_sram (
           .clk_i  (clk_i),
           .rst_ni (rst_ni),
-          .req_i  (fa_tag_req[bank]),
-          .we_i   (fa_tag_we[bank]),
-          .addr_i (fa_tag_addr[bank]),
+          .req_i  (fa_tag_req[way]),
+          .we_i   (fa_tag_we[way]),
+          .addr_i (fa_addr),
           .wuser_i('0),
-          .wdata_i(fa_tag_wdata[bank]),
+          .wdata_i(fa_tag_wdata[way]),
           .be_i   ('1),
           .ruser_o(),
-          .rdata_o(fa_tag_rdata[bank])
+          .rdata_o(fa_tag_rdata[way])
       );
       
-      // Connect FA bank signals
-      assign fa_data_req[bank] = |bank_req;  // Any bank request activates FA bank
-      assign fa_data_we[bank] = |bank_we;    // Any bank write activates FA bank
-      assign fa_data_addr[bank] = fa_sram_addr;
+      // FA control signals - cache line writes only for now
+      assign fa_data_req[way] = |bank_req;  // Any data request triggers all ways
+      assign fa_data_we[way] = wr_cl_vld_i & wr_cl_we_i[way];  // Only cache line writes for now
+      assign fa_data_wdata[way] = wr_cl_data_i;  // Write full cache line
+      assign fa_data_be[way] = (wr_cl_vld_i & wr_cl_we_i[way]) ? wr_cl_data_be_i : '0;
       
-      assign fa_tag_req[bank] = |vld_req;    // Any valid request activates FA tag bank
-      assign fa_tag_we[bank] = vld_we;
-      assign fa_tag_addr[bank] = fa_sram_addr;
+      assign fa_tag_req[way] = |vld_req;  // Any tag request
+      assign fa_tag_we[way] = vld_we & vld_req[way];  // Way-specific tag write
+      assign fa_tag_wdata[way] = {wr_cl_tag_i, vld_wdata[way]};
+      
+      // Tag outputs
+      assign tag_rdata[way] = fa_tag_rdata[way][CVA6Cfg.DCACHE_TAG_WIDTH-1:0];
+      assign rd_vld_bits_o[way] = fa_tag_rdata[way][CVA6Cfg.DCACHE_TAG_WIDTH];
     end
     
-    // FA data/tag reconstruction for compatibility with existing interface
-    for (genvar way = 0; way < CVA6Cfg.DCACHE_SET_ASSOC; way++) begin : gen_fa_way_mapping
-      localparam int bank_id = way / CVA6Cfg.DCACHE_FA_WAYS_PER_BANK;
-      localparam int way_in_bank = way % CVA6Cfg.DCACHE_FA_WAYS_PER_BANK;
-      localparam int way_start_bit = way_in_bank * CVA6Cfg.XLEN;
-      localparam int way_end_bit = (way_in_bank + 1) * CVA6Cfg.XLEN - 1;
-      localparam int tag_start_bit = way_in_bank * (CVA6Cfg.DCACHE_TAG_WIDTH + 1);
-      localparam int tag_end_bit = (way_in_bank + 1) * (CVA6Cfg.DCACHE_TAG_WIDTH + 1) - 1;
-      
-      // Map FA tag outputs
-      assign tag_rdata[way] = fa_tag_rdata[bank_id][tag_end_bit-1:tag_start_bit+1];
-      assign rd_vld_bits_o[way] = fa_tag_rdata[bank_id][tag_start_bit];
-      
-      assign fa_tag_wdata[bank_id][tag_end_bit:tag_start_bit] = {wr_cl_tag_i, vld_wdata[way]};
-    end
-    
-    // Fixed FA SRAM data path mapping
-    // Map between consolidated FA banks and the expected bank_word interface
-    for (genvar bank_word = 0; bank_word < DCACHE_NUM_BANKS; bank_word++) begin : gen_fa_bank_mapping
-      for (genvar way = 0; way < CVA6Cfg.DCACHE_SET_ASSOC; way++) begin : gen_fa_way_data
-        localparam int bank_id = way / CVA6Cfg.DCACHE_FA_WAYS_PER_BANK;
-        localparam int way_in_bank = way % CVA6Cfg.DCACHE_FA_WAYS_PER_BANK;
-        localparam int way_start_bit = way_in_bank * CVA6Cfg.XLEN;
-        localparam int way_end_bit = (way_in_bank + 1) * CVA6Cfg.XLEN - 1;
-        
-        // Read path: map FA SRAM output to bank_word interface
-        assign bank_rdata[bank_word][way] = fa_data_rdata[bank_id][way_end_bit:way_start_bit];
-        
-        // Write path: map bank_word interface to FA SRAM input
-        assign fa_data_wdata[bank_id][way_end_bit:way_start_bit] = bank_wdata[bank_word][way];
-        assign fa_data_be[bank_id][(way_in_bank+1)*(CVA6Cfg.XLEN/8)-1:(way_in_bank)*(CVA6Cfg.XLEN/8)] = bank_be[bank_word][way];
+    // Map FA cache lines to bank interface for reads
+    for (genvar bank_word = 0; bank_word < DCACHE_NUM_BANKS; bank_word++) begin : gen_fa_read_map
+      for (genvar way = 0; way < CVA6Cfg.DCACHE_SET_ASSOC; way++) begin : gen_fa_way_read
+        // Extract the appropriate word from the cache line stored in this way
+        assign bank_rdata[bank_word][way] = fa_data_rdata[way][bank_word*CVA6Cfg.XLEN +: CVA6Cfg.XLEN];
       end
     end
     

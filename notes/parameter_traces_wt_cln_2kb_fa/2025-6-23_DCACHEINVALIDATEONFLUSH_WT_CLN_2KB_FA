@@ -1,0 +1,84 @@
+CVA6ConfigDcacheInvalidateOnFlush = 0 Signal Flow Tree
+=====================================================
+
+1. CONFIGURATION PHASE (cv32a6_imac_sv32_config_pkg.sv)
+   └── cva6_cfg.'{ DcacheInvalidateOnFlush: bit'(0) }
+       └── Implicitly set to 0 (not explicitly defined in config)
+
+2. BUILD/DERIVATION PHASE (build_config_pkg.sv)
+   └── CVA6Cfg.DcacheInvalidateOnFlush = 0
+       └── cfg.DcacheInvalidateOnFlush = CVA6Cfg.DcacheInvalidateOnFlush = 0
+
+3. MODULE INSTANTIATION PHASE
+   └── std_cache_subsystem (core/cache_subsystem/std_cache_subsystem.sv)
+       └── wt_cln_dcache_ctrler (core/cache_subsystem/wt_cln_dcache_ctrl.sv)
+           └── parameter DcacheInvalidateOnFlush = CONFIG.DcacheInvalidateOnFlush = 0
+
+4. FLUSH OPERATION BEHAVIOR
+   └── Cache Flush Implementation:
+       ├── If DcacheInvalidateOnFlush = 1:
+       │   ├── Flush operation invalidates cache lines
+       │   ├── Cache lines marked as invalid after flush
+       │   └── Subsequent accesses result in cache misses
+       └── If DcacheInvalidateOnFlush = 0: (CURRENT CONFIGURATION)
+           ├── Flush operation does NOT invalidate cache lines
+           ├── Cache lines remain valid after flush
+           └── Cache hits continue after flush operation
+
+5. FUNCTIONAL IMPACT (DcacheInvalidateOnFlush = 0)
+   └── Flush Behavior:
+       ├── Cache flush ensures write-through completion
+       ├── All pending writes committed to memory
+       ├── Cache lines retain valid data
+       ├── No cache warming penalty after flush
+       └── Performance maintained post-flush
+
+6. WRITE-THROUGH CACHE CONSIDERATIONS
+   └── WT_CLN Cache Behavior:
+       ├── All writes immediately go to memory
+       ├── Cache lines always contain clean data
+       ├── No dirty data to writeback during flush
+       ├── Flush primarily ensures write completion
+       └── Invalidation not required for coherency
+
+7. PERFORMANCE IMPLICATIONS
+   └── Post-Flush Performance (DcacheInvalidateOnFlush = 0):
+       ├── No cache miss penalty after flush
+       ├── Maintained cache hit rates
+       ├── No cache warming required
+       ├── Better performance for flush-heavy scenarios
+       └── Reduced memory traffic post-flush
+
+8. COHERENCY CONSIDERATIONS
+   └── Multi-agent Coherency:
+       ├── Write-through ensures memory is up-to-date
+       ├── Other agents see consistent memory state
+       ├── Cache invalidation may be required for strict coherency
+       └── Configuration suitable for single-core systems
+
+9. CONTROL LOGIC IMPACT
+   └── Cache Controller Implementation:
+       ├── Simplified flush logic (no invalidation)
+       ├── Flush state machine reduced complexity
+       ├── No need to clear valid bits during flush
+       └── Faster flush completion
+
+10. USE CASE SCENARIOS
+    └── When DcacheInvalidateOnFlush = 0 is appropriate:
+        ├── Single-core systems
+        ├── Write-through cache with strong ordering
+        ├── Performance-critical applications
+        └── Systems without cache coherency requirements
+
+    └── When DcacheInvalidateOnFlush = 1 might be needed:
+        ├── Multi-core systems with cache coherency
+        ├── Systems with shared memory regions
+        ├── Strict memory consistency requirements
+        └── Debug/test scenarios requiring cache invalidation
+
+KEY RELATIONSHIPS:
+- DcacheInvalidateOnFlush = 0 preserves cache validity after flush
+- Write-through cache reduces need for invalidation
+- Improves post-flush performance by avoiding cache misses
+- Suitable for single-core systems with write-through caches
+- Simplifies cache controller flush logic
