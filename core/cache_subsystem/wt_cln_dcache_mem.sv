@@ -459,11 +459,11 @@ module wt_cln_dcache_mem
         fa_write_cl_be = wr_cl_data_be_i;
       end
       
-      // For FA mode, acknowledge single word writes but don't actually handle them yet
-      // This prevents the cache controller from hanging on single word writes
+      // TEMPORARY: Disable single word writes in FA mode to test cache line operations
+      // The read-modify-write logic has hazards that need proper handling
       if (|wr_req_i) begin
-        // Set wr_ack_o for single word writes in FA mode
-        // TODO: Implement proper single word write support
+        // fa_word_write_req = 1'b1;  // DISABLED
+        // TODO: Implement proper single word write with read-modify-write handling
       end
     end
     
