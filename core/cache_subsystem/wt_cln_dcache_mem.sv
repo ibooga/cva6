@@ -162,33 +162,47 @@ module wt_cln_dcache_mem
   assign vld_req       = (wr_cl_vld_i) ? wr_cl_we_i : (rd_acked) ? '1 : '0;
 
 
-  // priority masking
-  // disable low prio requests when any of the high prio reqs is present
-  assign rd_req_prio   = rd_req_i & rd_prio_i;
-  assign rd_req_masked = (|rd_req_prio) ? rd_req_prio : rd_req_i;
+  // FA vs SA mode handling for read acknowledgment
+  if (CVA6Cfg.DCACHE_INDEX_WIDTH == 0) begin : gen_fa_read_ack
+    // FA Mode: Simple acknowledgment without arbiter conflicts
+    logic rd_req_fa;
+    assign rd_req_fa = |rd_req_i;
+    assign rd_wr_address_conflict = wr_cl_vld_i;
+    
+    // Grant immediately if no write conflict
+    assign rd_ack_o = rd_req_i & {NumPorts{~rd_wr_address_conflict}};
+    assign vld_sel_d = '0;  // Single entry selector  
+    assign rd_acked = rd_req_fa & ~rd_wr_address_conflict;
+  end else begin : gen_sa_read_ack  
+    // SA Mode: Standard arbiter logic
+    // priority masking
+    // disable low prio requests when any of the high prio reqs is present
+    assign rd_req_prio   = rd_req_i & rd_prio_i;
+    assign rd_req_masked = (|rd_req_prio) ? rd_req_prio : rd_req_i;
 
-  // STANDARD: Default arbiter conflict detection logic
-  assign rd_wr_address_conflict = wr_cl_vld_i;
+    // STANDARD: Default arbiter conflict detection logic
+    assign rd_wr_address_conflict = wr_cl_vld_i;
 
-  logic rd_req;
-  rr_arb_tree #(
-      .NumIn    (NumPorts),
-      .DataWidth(1)
-  ) i_rr_arb_tree (
-      .clk_i  (clk_i),
-      .rst_ni (rst_ni),
-      .flush_i('0),
-      .rr_i   ('0),
-      .req_i  (rd_req_masked),
-      .gnt_o  (rd_ack_o),
-      .data_i ('0),
-      .gnt_i  (~rd_wr_address_conflict),
-      .req_o  (rd_req),
-      .data_o (),
-      .idx_o  (vld_sel_d)
-  );
+    logic rd_req;
+    rr_arb_tree #(
+        .NumIn    (NumPorts),
+        .DataWidth(1)
+    ) i_rr_arb_tree (
+        .clk_i  (clk_i),
+        .rst_ni (rst_ni),
+        .flush_i('0),
+        .rr_i   ('0),
+        .req_i  (rd_req_masked),
+        .gnt_o  (rd_ack_o),
+        .data_i ('0),
+        .gnt_i  (~rd_wr_address_conflict),
+        .req_o  (rd_req),
+        .data_o (),
+        .idx_o  (vld_sel_d)
+    );
 
-  assign rd_acked = rd_req & ~rd_wr_address_conflict;
+    assign rd_acked = rd_req & ~rd_wr_address_conflict;
+  end
 
   always_comb begin : p_bank_req
     vld_we   = wr_cl_vld_i;
@@ -427,7 +441,7 @@ module wt_cln_dcache_mem
       assign rd_vld_bits_o[way] = fa_tag_rdata[way][CVA6Cfg.DCACHE_TAG_WIDTH];
     end
     
-    // FA Controller - Interface with existing cache controller
+    // FA Controller - Direct interface bypassing SA banking logic
     always_comb begin
       // Default outputs
       fa_read_req = 1'b0;
@@ -443,12 +457,15 @@ module wt_cln_dcache_mem
       fa_write_word_be = '0;
       fa_write_word_offset = '0;
       
-      // Map existing cache controller signals to FA operations
-      if (|vld_req && !vld_we) begin
-        // Read request (tag lookup)
-        fa_read_req = 1'b1;
-        fa_read_tag = rd_tag;
-        fa_read_offset = bank_off_q;
+      // Direct read requests - bypass SA banking signals entirely  
+      // Find first active port for FA cache access
+      for (int port = 0; port < NumPorts; port++) begin
+        if (rd_req_i[port] && !rd_tag_only_i[port]) begin
+          fa_read_req = 1'b1;
+          fa_read_tag = rd_tag_i[port];
+          fa_read_offset = rd_off_i[port];
+          break; // Use first active port
+        end
       end
       
       if (wr_cl_vld_i && |wr_cl_we_i) begin
@@ -458,17 +475,12 @@ module wt_cln_dcache_mem
         fa_write_tag = wr_cl_tag_i;
         fa_write_cl_data = wr_cl_data_i;
         fa_write_cl_be = wr_cl_data_be_i;
-        
-        // DEBUG: Print cache line writes
-        // $display("[FA] Cache line write: way=%h, tag=%h", wr_cl_we_i, wr_cl_tag_i);
       end
       
-      // Single word writes in FA mode - need read-modify-write
+      // Single word writes in FA mode
       if (|wr_req_i) begin
         fa_word_write_req = 1'b1;
-        fa_write_way = wr_req_i;  // Way selector from cache controller
-        // For single word writes, we need the tag from the selected cache line
-        // The cache controller should only request writes to valid entries
+        fa_write_way = wr_req_i;
         fa_write_word_data = wr_data_i;
         fa_write_word_be = wr_data_be_i;
         fa_write_word_offset = wr_off_i[CVA6Cfg.DCACHE_OFFSET_WIDTH-1:CVA6Cfg.XLEN_ALIGN_BYTES];
