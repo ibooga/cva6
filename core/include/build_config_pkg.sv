@@ -143,7 +143,9 @@ package build_config_pkg;
     cfg.DCACHE_SET_ASSOC_WIDTH = CVA6Cfg.DcacheSetAssoc > 1 ? $clog2(CVA6Cfg.DcacheSetAssoc) :
         CVA6Cfg.DcacheSetAssoc;
     cfg.DCACHE_INDEX_WIDTH = DCACHE_INDEX_WIDTH;
-    cfg.DCACHE_TAG_WIDTH = cfg.PLEN - DCACHE_INDEX_WIDTH;
+    cfg.DCACHE_TAG_WIDTH = (DCACHE_INDEX_WIDTH == 0) ? 
+                           cfg.PLEN - DCACHE_OFFSET_WIDTH :  // FA: tag excludes offset
+                           cfg.PLEN - DCACHE_INDEX_WIDTH;    // SA: tag excludes index  
     cfg.DCACHE_LINE_WIDTH = CVA6Cfg.DcacheLineWidth;
     cfg.DCACHE_USER_LINE_WIDTH = (CVA6Cfg.AxiUserWidth == 1) ? 4 : CVA6Cfg.DcacheLineWidth;
     cfg.DCACHE_USER_WIDTH = CVA6Cfg.AxiUserWidth;

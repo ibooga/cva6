@@ -407,10 +407,11 @@ module wt_cln_dcache_mem
           fa_data_be[way] = fa_write_cl_be;
           fa_tag_wdata[way] = {fa_write_tag, 1'b1}; // Tag + valid
         end else if (fa_word_write_req & fa_write_way[way]) begin
-          // Single word write - read-modify-write
-          fa_data_wdata[way] = fa_data_rdata[way]; // Default to current data
-          fa_data_be[way] = '0; // Default to no write
-          // Update specific word
+          // Single word write - use byte enables to write only the specific word
+          // This avoids read-modify-write hazards by using SRAM byte enables
+          fa_data_wdata[way] = '0; // Initialize all data
+          fa_data_be[way] = '0; // Initialize all byte enables to disabled
+          // Set only the data and byte enables for the target word
           fa_data_wdata[way][fa_write_word_offset*CVA6Cfg.XLEN +: CVA6Cfg.XLEN] = fa_write_word_data;
           fa_data_be[way][fa_write_word_offset*(CVA6Cfg.XLEN/8) +: (CVA6Cfg.XLEN/8)] = fa_write_word_be;
           fa_tag_wdata[way] = fa_tag_rdata[way]; // Keep existing tag+valid
@@ -457,13 +458,20 @@ module wt_cln_dcache_mem
         fa_write_tag = wr_cl_tag_i;
         fa_write_cl_data = wr_cl_data_i;
         fa_write_cl_be = wr_cl_data_be_i;
+        
+        // DEBUG: Print cache line writes
+        // $display("[FA] Cache line write: way=%h, tag=%h", wr_cl_we_i, wr_cl_tag_i);
       end
       
-      // TEMPORARY: Disable single word writes in FA mode to test cache line operations
-      // The read-modify-write logic has hazards that need proper handling
+      // Single word writes in FA mode - need read-modify-write
       if (|wr_req_i) begin
-        // fa_word_write_req = 1'b1;  // DISABLED
-        // TODO: Implement proper single word write with read-modify-write handling
+        fa_word_write_req = 1'b1;
+        fa_write_way = wr_req_i;  // Way selector from cache controller
+        // For single word writes, we need the tag from the selected cache line
+        // The cache controller should only request writes to valid entries
+        fa_write_word_data = wr_data_i;
+        fa_write_word_be = wr_data_be_i;
+        fa_write_word_offset = wr_off_i[CVA6Cfg.DCACHE_OFFSET_WIDTH-1:CVA6Cfg.XLEN_ALIGN_BYTES];
       end
     end
     
