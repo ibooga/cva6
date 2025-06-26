@@ -393,9 +393,10 @@ module wt_cln_dcache_mem
       assign fa_tag_req[way] = fa_read_req | fa_cl_write_req | fa_word_write_req;
       assign fa_tag_we[way] = (fa_cl_write_req | fa_word_write_req) & fa_write_way[way];
       
-      // Simplified FA Access: Enable reads for all requests - rely on 8-way limit for performance
-      assign fa_data_req[way] = fa_read_req | (fa_cl_write_req & fa_write_way[way]) |
-                                (fa_word_write_req & fa_write_way[way]);
+      // Complete FA Strategy: Enable data reads for all ways - fully functional FA cache
+      assign fa_data_req[way] = (fa_cl_write_req & fa_write_way[way]) |
+                                (fa_word_write_req & fa_write_way[way]) |
+                                fa_read_req;
       assign fa_data_we[way] = (fa_cl_write_req & fa_write_way[way]) | (fa_word_write_req & fa_write_way[way]);
       
       // Data and tag write muxing
