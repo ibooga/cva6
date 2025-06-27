@@ -159,29 +159,64 @@ module wt_cln_dcache_mem
   assign rd_tag        = rd_tag_i[vld_sel_q];  //delayed by one cycle
   assign bank_off_d    = (wr_cl_vld_i) ? wr_cl_off_i : rd_off_i[vld_sel_d];
   assign bank_idx_d    = (wr_cl_vld_i) ? wr_cl_idx_i : rd_idx_i[vld_sel_d];
-  assign vld_req       = (wr_cl_vld_i) ? wr_cl_we_i : (rd_acked) ? '1 : '0;
+  // FA mode bypasses vld_req since it has its own tag arrays
+  generate
+    if (CVA6Cfg.DCACHE_INDEX_WIDTH == 0) begin : gen_fa_vld_req
+      assign vld_req = '0; // FA mode doesn't use SA tag arrays
+    end else begin : gen_sa_vld_req  
+      assign vld_req = (wr_cl_vld_i) ? wr_cl_we_i : (rd_acked) ? '1 : '0;
+    end
+  endgenerate
 
+
+  // Common signals
+  assign rd_wr_address_conflict = wr_cl_vld_i;
 
   // FA vs SA mode handling for read acknowledgment
   if (CVA6Cfg.DCACHE_INDEX_WIDTH == 0) begin : gen_fa_read_ack
-    // FA Mode: Simple acknowledgment without arbiter conflicts
-    logic rd_req_fa;
-    assign rd_req_fa = |rd_req_i;
-    assign rd_wr_address_conflict = wr_cl_vld_i;
+    // FA Mode: Proper timing with SRAM access delays
+    logic rd_req_fa, rd_req_fa_q;
+    logic [NumPorts-1:0] rd_req_pending;
     
-    // Grant immediately if no write conflict
-    assign rd_ack_o = rd_req_i & {NumPorts{~rd_wr_address_conflict}};
-    assign vld_sel_d = '0;  // Single entry selector  
-    assign rd_acked = rd_req_fa & ~rd_wr_address_conflict;
+    assign rd_req_fa = |rd_req_i;
+    
+    // Pipeline read requests through SRAM access timing
+    always_ff @(posedge clk_i or negedge rst_ni) begin
+      if (!rst_ni) begin
+        rd_req_fa_q <= 1'b0;
+        rd_req_pending <= '0;
+      end else begin
+        rd_req_fa_q <= rd_req_fa & ~rd_wr_address_conflict;
+        // Latch requesting ports for response
+        if (rd_req_fa & ~rd_wr_address_conflict) begin
+          rd_req_pending <= rd_req_i;
+        end else if (rd_req_fa_q) begin
+          rd_req_pending <= '0; // Clear after response
+        end
+      end
+    end
+    
+    // Grant acknowledgment after SRAM read delay (one cycle for tag+data)
+    assign rd_ack_o = rd_req_pending & {NumPorts{rd_req_fa_q}};
+    
+    // Find first active port for proper signal selection
+    always_comb begin
+      vld_sel_d = '0;
+      for (int port = 0; port < NumPorts; port++) begin
+        if (rd_req_i[port] & ~rd_wr_address_conflict) begin
+          vld_sel_d = port[$clog2(NumPorts)-1:0];
+          break;
+        end
+      end
+    end
+    
+    assign rd_acked = rd_req_fa_q;
   end else begin : gen_sa_read_ack  
     // SA Mode: Standard arbiter logic
     // priority masking
     // disable low prio requests when any of the high prio reqs is present
     assign rd_req_prio   = rd_req_i & rd_prio_i;
     assign rd_req_masked = (|rd_req_prio) ? rd_req_prio : rd_req_i;
-
-    // STANDARD: Default arbiter conflict detection logic
-    assign rd_wr_address_conflict = wr_cl_vld_i;
 
     logic rd_req;
     rr_arb_tree #(
@@ -217,10 +252,12 @@ module wt_cln_dcache_mem
 
     // Handle FA mode vs SA mode
     if (CVA6Cfg.DCACHE_INDEX_WIDTH == 0) begin
-      // FA mode: Only handle single word write acknowledgment
+      // FA mode: Simplified acknowledgment - always ACK writes immediately
       if (|wr_req_i) begin
         wr_ack_o = 1'b1;
       end
+      // FA mode: NO bank_req needed - FA uses individual SRAMs directly
+      // bank_req is only for SA banking infrastructure
     end else begin
       // SA mode: Full banking logic
       if (wr_cl_vld_i & |wr_cl_we_i) begin
@@ -259,12 +296,27 @@ module wt_cln_dcache_mem
   logic [                   $clog2(CVA6Cfg.WtDcacheWbufDepth)-1:0] wbuffer_hit_idx;
   logic [                    $clog2(CVA6Cfg.DCACHE_SET_ASSOC)-1:0] rd_hit_idx;
 
-  assign cmp_en_d = (|vld_req) & ~vld_we;
+  // FA mode needs cmp_en_d enabled even without vld_req
+  generate
+    if (CVA6Cfg.DCACHE_INDEX_WIDTH == 0) begin : gen_fa_cmp_en
+      // FA mode: Enable comparison after SRAM read completes (use delayed signal from read ack block)
+      assign cmp_en_d = gen_fa_read_ack.rd_req_fa_q & ~vld_we;
+    end else begin : gen_sa_cmp_en
+      // SA mode: Original logic
+      assign cmp_en_d = (|vld_req) & ~vld_we;
+    end
+  endgenerate
 
   // word tag comparison in write buffer
   logic [CVA6Cfg.PLEN-1:0] wr_addr, rd_addr;
-  assign wr_addr = {wr_cl_tag_i, wr_cl_idx_i, wr_cl_off_i};
-  assign rd_addr = {rd_tag, bank_idx_q, bank_off_q};
+  // FA mode write address construction: Index width is 0, so exclude index bits  
+  assign wr_addr = (CVA6Cfg.DCACHE_INDEX_WIDTH == 0) ?
+                   {wr_cl_tag_i, wr_cl_off_i} :              // FA: tag + offset only
+                   {wr_cl_tag_i, wr_cl_idx_i, wr_cl_off_i};  // SA: tag + index + offset
+  // FA mode address construction: Index width is 0, so exclude index bits
+  assign rd_addr = (CVA6Cfg.DCACHE_INDEX_WIDTH == 0) ? 
+                   {rd_tag, bank_off_q} :                    // FA: tag + offset only
+                   {rd_tag, bank_idx_q, bank_off_q};         // SA: tag + index + offset
   assign wbuffer_cmp_addr = (wr_cl_vld_i) ? wr_addr : rd_addr;
   // hit generation
   for (genvar i = 0; i < CVA6Cfg.DCACHE_SET_ASSOC; i++) begin : gen_tag_cmpsel
@@ -332,8 +384,8 @@ module wt_cln_dcache_mem
 
   logic [CVA6Cfg.DCACHE_TAG_WIDTH:0] vld_tag_rdata[CVA6Cfg.DCACHE_SET_ASSOC-1:0];
 
-  // Fully Associative Cache Implementation - Bypasses Banking Infrastructure
-  if (CVA6Cfg.DCACHE_INDEX_WIDTH == 0) begin : gen_fa_bypass
+  // Fully Associative Cache Implementation - Clean Separation from SA Logic
+  if (CVA6Cfg.DCACHE_INDEX_WIDTH == 0) begin : gen_fa_cache
     // FA cache with direct cache line storage, bypassing complex banking
     
     // FA control and data signals
@@ -356,10 +408,35 @@ module wt_cln_dcache_mem
     logic [CVA6Cfg.DCACHE_SET_ASSOC-1:0] fa_tag_req, fa_tag_we;
     logic [CVA6Cfg.DCACHE_SET_ASSOC-1:0][CVA6Cfg.DCACHE_TAG_WIDTH:0] fa_tag_wdata, fa_tag_rdata;
     
-    // FA address is always 0 (single entry per way)
+    // FA explicit valid bit tracking - critical for proper initialization
+    // SRAM-based valid bits are unreliable at startup, so we maintain explicit state
+    logic [CVA6Cfg.DCACHE_SET_ASSOC-1:0] fa_way_valid_q, fa_way_valid_d;
+    
+    // FA address calculation: Use cache line addressing for proper storage distribution
     localparam FA_ADDR_BITS = (CVA6Cfg.DCACHE_NUM_WORDS > 1) ? $clog2(CVA6Cfg.DCACHE_NUM_WORDS) : 1;
     logic [FA_ADDR_BITS-1:0] fa_addr;
-    assign fa_addr = '0;
+    
+    // Generate proper FA address based on tag for distribution across SRAM words
+    // Use lower bits of tag to distribute cache lines across available SRAM addresses
+    always_comb begin
+      if (fa_cl_write_req || fa_word_write_req) begin
+        // For writes, use write tag
+        if (CVA6Cfg.DCACHE_NUM_WORDS > 1) begin
+          fa_addr = fa_write_tag[FA_ADDR_BITS-1:0];
+        end else begin
+          fa_addr = '0;
+        end
+      end else if (fa_read_req) begin
+        // For reads, use read tag  
+        if (CVA6Cfg.DCACHE_NUM_WORDS > 1) begin
+          fa_addr = fa_read_tag[FA_ADDR_BITS-1:0];
+        end else begin
+          fa_addr = '0;
+        end
+      end else begin
+        fa_addr = '0;
+      end
+    end
     
     // Generate storage arrays
     for (genvar way = 0; way < CVA6Cfg.DCACHE_SET_ASSOC; way++) begin : gen_fa_way
@@ -436,12 +513,14 @@ module wt_cln_dcache_mem
         end
       end
       
-      // Extract tag and valid from storage
+      // Extract tag and valid from storage with proper initialization handling
       assign tag_rdata[way] = fa_tag_rdata[way][CVA6Cfg.DCACHE_TAG_WIDTH-1:0];
-      assign rd_vld_bits_o[way] = fa_tag_rdata[way][CVA6Cfg.DCACHE_TAG_WIDTH];
+      // For FA cache, use explicit valid bit tracking instead of unreliable SRAM data
+      // This fixes the all-ways-hit problem caused by uninitialized SRAM data
+      assign rd_vld_bits_o[way] = fa_way_valid_q[way];
     end
     
-    // FA Controller - Direct interface bypassing SA banking logic
+      // FA Controller - Fixed interface with proper acknowledgment
     always_comb begin
       // Default outputs
       fa_read_req = 1'b0;
@@ -457,14 +536,16 @@ module wt_cln_dcache_mem
       fa_write_word_be = '0;
       fa_write_word_offset = '0;
       
-      // Direct read requests - bypass SA banking signals entirely  
-      // Find first active port for FA cache access
-      for (int port = 0; port < NumPorts; port++) begin
-        if (rd_req_i[port] && !rd_tag_only_i[port]) begin
-          fa_read_req = 1'b1;
-          fa_read_tag = rd_tag_i[port];
-          fa_read_offset = rd_off_i[port];
-          break; // Use first active port
+      // Read requests: Always enable for any request (FA cache is fast)
+      if (|rd_req_i && !vld_we) begin
+        fa_read_req = 1'b1;
+        // Use first requesting port - FA cache can handle immediately
+        for (int port = 0; port < NumPorts; port++) begin
+          if (rd_req_i[port]) begin
+            fa_read_tag = rd_tag_i[port];
+            fa_read_offset = rd_off_i[port];
+            break;
+          end
         end
       end
       
@@ -487,6 +568,35 @@ module wt_cln_dcache_mem
       end
     end
     
+    // FA explicit valid bit management - fix for all-ways-hit problem
+    always_comb begin
+      fa_way_valid_d = fa_way_valid_q;
+      
+      // For cache line writes, use wr_vld_bits_i to determine valid state
+      // This correctly handles both flush (wr_vld_bits_i='0) and fill (wr_vld_bits_i=one-hot)
+      if (fa_cl_write_req && |fa_write_way) begin
+        // Clear valid bits for ways being written, then set based on wr_vld_bits_i
+        fa_way_valid_d = (fa_way_valid_q & ~fa_write_way) | wr_vld_bits_i;
+        // Debug: Add assertion to track flush vs fill operations
+        // synthesis translate_off
+        if (fa_write_way == '1 && wr_vld_bits_i == '0) begin
+          $display("FA CACHE DEBUG: FLUSH operation detected at time %t", $time);
+          $display("  fa_write_way=%h, wr_vld_bits_i=%h", fa_write_way, wr_vld_bits_i);
+          $display("  fa_way_valid_q=%h -> fa_way_valid_d=%h", fa_way_valid_q, fa_way_valid_d);
+        end else if (|wr_vld_bits_i) begin
+          $display("FA CACHE DEBUG: FILL operation detected at time %t", $time);
+          $display("  fa_write_way=%h, wr_vld_bits_i=%h", fa_write_way, wr_vld_bits_i);
+          $display("  fa_way_valid_q=%h -> fa_way_valid_d=%h", fa_way_valid_q, fa_way_valid_d);
+        end
+        // synthesis translate_on
+      end
+      
+      // Set valid bit when single word is written (for write-through)
+      if (fa_word_write_req && |fa_write_way) begin
+        fa_way_valid_d = fa_way_valid_q | fa_write_way;
+      end
+    end
+    
     // Note: wr_ack_o handled in banking logic section
     
     // Map FA cache lines to bank interface for compatibility
@@ -494,6 +604,8 @@ module wt_cln_dcache_mem
       for (genvar way = 0; way < CVA6Cfg.DCACHE_SET_ASSOC; way++) begin : gen_fa_way_read
         // Extract correct word from cache line read from SRAM
         assign bank_rdata[bank_word][way] = fa_data_rdata[way][bank_word*CVA6Cfg.XLEN +: CVA6Cfg.XLEN];
+        // FA cache doesn't use user data, assign zero
+        assign bank_ruser[bank_word][way] = '0;
       end
     end
     
@@ -554,11 +666,19 @@ module wt_cln_dcache_mem
       bank_off_q <= '0;
       vld_sel_q  <= '0;
       cmp_en_q   <= '0;
+      // FA cache explicit valid bit initialization - critical fix for all-ways-hit
+      if (CVA6Cfg.DCACHE_INDEX_WIDTH == 0) begin
+        gen_fa_cache.fa_way_valid_q <= '0; // Start with all ways invalid
+      end
     end else begin
       bank_idx_q <= bank_idx_d;
       bank_off_q <= bank_off_d;
       vld_sel_q  <= vld_sel_d;
       cmp_en_q   <= cmp_en_d;
+      // FA cache explicit valid bit update
+      if (CVA6Cfg.DCACHE_INDEX_WIDTH == 0) begin
+        gen_fa_cache.fa_way_valid_q <= gen_fa_cache.fa_way_valid_d;
+      end
     end
   end
 

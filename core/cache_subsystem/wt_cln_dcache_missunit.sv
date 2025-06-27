@@ -204,11 +204,27 @@ module wt_cln_dcache_missunit
   // MSHR and way replacement logic (only for read ops)
   ///////////////////////////////////////////////////////
 
-  // find invalid cache line
+  // find invalid cache line - use proper cache valid bits
+  // For FA cache, we need to determine valid ways for the current address
+  // For SA cache, use port-specific valid bits as before
+  logic [CVA6Cfg.DCACHE_SET_ASSOC-1:0] current_vld_bits;
+  
+  generate
+    if (CVA6Cfg.DCACHE_INDEX_WIDTH == 0) begin : gen_fa_valid_bits
+      // FA mode: For now, use a conservative approach - assume all ways could be valid
+      // This forces the replacement logic to use random replacement instead of invalid way first
+      // A more sophisticated implementation would trigger a cache lookup, but that adds complexity
+      assign current_vld_bits = '1; // Conservative: assume all ways valid, use random replacement
+    end else begin : gen_sa_valid_bits
+      // SA mode: Use port-specific valid bits from last cache access
+      assign current_vld_bits = miss_vld_bits_i[miss_port_idx];
+    end
+  endgenerate
+  
   lzc #(
       .WIDTH(CVA6Cfg.DCACHE_SET_ASSOC)
   ) i_lzc_inv (
-      .in_i   (~miss_vld_bits_i[miss_port_idx]),
+      .in_i   (~current_vld_bits),
       .cnt_o  (inv_way),
       .empty_o(all_ways_valid)
   );
