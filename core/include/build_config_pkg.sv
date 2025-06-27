@@ -162,11 +162,13 @@ package build_config_pkg;
     `define FA_BANKS(ways) (((ways) <= 8) ? 1 : 2)
     
     if (DCACHE_INDEX_WIDTH == 0) begin
-      // Fully Associative: Use macro-calculated optimal parameters
-      cfg.DCACHE_SET_ASSOC = `FA_OPTIMAL_WAYS(`FA_TOTAL_LINES(CVA6Cfg.DcacheByteSize, CVA6Cfg.DcacheLineWidth));
-      cfg.DCACHE_NUM_WORDS = `FA_FINAL_WORDS(`FA_WORDS_PER_WAY(`FA_TOTAL_LINES(CVA6Cfg.DcacheByteSize, CVA6Cfg.DcacheLineWidth), `FA_OPTIMAL_WAYS(`FA_TOTAL_LINES(CVA6Cfg.DcacheByteSize, CVA6Cfg.DcacheLineWidth))));
-      cfg.DCACHE_FA_BANKS = `FA_BANKS(`FA_OPTIMAL_WAYS(`FA_TOTAL_LINES(CVA6Cfg.DcacheByteSize, CVA6Cfg.DcacheLineWidth)));
-      cfg.DCACHE_FA_WAYS_PER_BANK = `FA_OPTIMAL_WAYS(`FA_TOTAL_LINES(CVA6Cfg.DcacheByteSize, CVA6Cfg.DcacheLineWidth)) / `FA_BANKS(`FA_OPTIMAL_WAYS(`FA_TOTAL_LINES(CVA6Cfg.DcacheByteSize, CVA6Cfg.DcacheLineWidth)));
+      // Fully Associative: Use configured ways if reasonable, otherwise macro-calculated optimal
+      cfg.DCACHE_SET_ASSOC = (CVA6Cfg.DcacheSetAssoc <= `FA_TOTAL_LINES(CVA6Cfg.DcacheByteSize, CVA6Cfg.DcacheLineWidth)) ? 
+                            CVA6Cfg.DcacheSetAssoc : 
+                            `FA_OPTIMAL_WAYS(`FA_TOTAL_LINES(CVA6Cfg.DcacheByteSize, CVA6Cfg.DcacheLineWidth));
+      cfg.DCACHE_NUM_WORDS = `FA_FINAL_WORDS(`FA_WORDS_PER_WAY(`FA_TOTAL_LINES(CVA6Cfg.DcacheByteSize, CVA6Cfg.DcacheLineWidth), cfg.DCACHE_SET_ASSOC));
+      cfg.DCACHE_FA_BANKS = `FA_BANKS(cfg.DCACHE_SET_ASSOC);
+      cfg.DCACHE_FA_WAYS_PER_BANK = cfg.DCACHE_SET_ASSOC / `FA_BANKS(cfg.DCACHE_SET_ASSOC);
     end else begin
       // Set-Associative: Standard calculation (unchanged)
       cfg.DCACHE_SET_ASSOC = CVA6Cfg.DcacheSetAssoc;

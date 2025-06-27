@@ -559,7 +559,7 @@ module wt_cln_axi_adapter
       dcache_rtrn_type_d    = wt_cln_cache_pkg::DCACHE_INV_REQ;
       dcache_rtrn_vld_d     = 1'b1;
       dcache_rtrn_inv_d.all = 1'b1;
-      dcache_rtrn_inv_d.idx = inval_addr_i[CVA6Cfg.DCACHE_INDEX_WIDTH-1:0];
+      dcache_rtrn_inv_d.idx = safe_get_cache_index(inval_addr_i, CVA6Cfg.DCACHE_INDEX_WIDTH, CVA6Cfg.DCACHE_OFFSET_WIDTH);
       //////////////////////////////////////
       // dcache needs some special treatment
       // for arbitration and decoding of atomics
@@ -573,7 +573,7 @@ module wt_cln_axi_adapter
       dcache_rtrn_vld_d = 1'b1;
 
       dcache_rtrn_inv_d.all = 1'b1;
-      dcache_rtrn_inv_d.idx = dcache_data.paddr[CVA6Cfg.DCACHE_INDEX_WIDTH-1:0];
+      dcache_rtrn_inv_d.idx = safe_get_cache_index(dcache_data.paddr, CVA6Cfg.DCACHE_INDEX_WIDTH, CVA6Cfg.DCACHE_OFFSET_WIDTH);
       //////////////////////////////////////
       // read responses
       // note that in case of atomics, the dcache sequentializes requests and

@@ -169,8 +169,16 @@ module wt_cln_dcache_mem
   endgenerate
 
 
-  // Common signals
-  assign rd_wr_address_conflict = wr_cl_vld_i;
+  // Common signals - Fixed conflict detection to avoid REPLAY_REQ hangs
+  // Only conflict if read and write target the same cache line address
+  logic [CVA6Cfg.PLEN-CVA6Cfg.DCACHE_OFFSET_WIDTH-1:0] rd_cl_addr, wr_cl_addr;
+  assign rd_cl_addr = (CVA6Cfg.DCACHE_INDEX_WIDTH == 0) ?
+                      {rd_tag} :                              // FA: tag only
+                      {rd_tag, bank_idx_d};                   // SA: tag + index
+  assign wr_cl_addr = (CVA6Cfg.DCACHE_INDEX_WIDTH == 0) ?
+                      {wr_cl_tag_i} :                         // FA: tag only  
+                      {wr_cl_tag_i, wr_cl_idx_i};             // SA: tag + index
+  assign rd_wr_address_conflict = wr_cl_vld_i && (rd_cl_addr == wr_cl_addr);
 
   // FA vs SA mode handling for read acknowledgment
   if (CVA6Cfg.DCACHE_INDEX_WIDTH == 0) begin : gen_fa_read_ack
