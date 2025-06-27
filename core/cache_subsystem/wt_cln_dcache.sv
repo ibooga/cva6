@@ -321,48 +321,88 @@ module wt_cln_dcache
   // memory arrays, arbitration and tag comparison
   ///////////////////////////////////////////////////////
 
-  wt_cln_dcache_mem #(
-      .CVA6Cfg(CVA6Cfg),
-      .DCACHE_CL_IDX_WIDTH(DCACHE_CL_IDX_WIDTH),
-      .wbuffer_t(wbuffer_t),
-      .NumPorts(NumPorts)
-  ) i_wt_cln_dcache_mem (
-      .clk_i          (clk_i),
-      .rst_ni         (rst_ni),
-      // read ports
-      .rd_prio_i      (rd_prio),
-      .rd_tag_i       (rd_tag),
-      .rd_idx_i       (rd_idx),
-      .rd_off_i       (rd_off),
-      .rd_req_i       (rd_req),
-      .rd_tag_only_i  (rd_tag_only),
-      .rd_ack_o       (rd_ack),
-      .rd_vld_bits_o  (rd_vld_bits),
-      .rd_hit_oh_o    (rd_hit_oh),
-      .rd_data_o      (rd_data),
-      .rd_user_o      (rd_user),
-      // cacheline write port
-      .wr_cl_vld_i    (wr_cl_vld),
-      .wr_cl_nc_i     (wr_cl_nc),
-      .wr_cl_we_i     (wr_cl_we),
-      .wr_cl_tag_i    (wr_cl_tag),
-      .wr_cl_idx_i    (wr_cl_idx),
-      .wr_cl_off_i    (wr_cl_off),
-      .wr_cl_data_i   (wr_cl_data),
-      .wr_cl_user_i   (wr_cl_user),
-      .wr_cl_data_be_i(wr_cl_data_be),
-      .wr_vld_bits_i  (wr_vld_bits),
-      // single word write port
-      .wr_req_i       (wr_req),
-      .wr_ack_o       (wr_ack),
-      .wr_idx_i       (wr_idx),
-      .wr_off_i       (wr_off),
-      .wr_data_i      (wr_data),
-      .wr_user_i      (wr_user),
-      .wr_data_be_i   (wr_data_be),
-      // write buffer forwarding
-      .wbuffer_data_i (wbuffer_data)
-  );
+  generate
+    if (CVA6Cfg.DCACHE_INDEX_WIDTH == 0) begin : gen_fa_dcache_mem
+      // Fully Associative Cache Implementation
+      wt_cln_dcache_mem_fa #(
+          .CVA6Cfg(CVA6Cfg),
+          .NumPorts(NumPorts)
+      ) i_wt_cln_dcache_mem_fa (
+          .clk_i          (clk_i),
+          .rst_ni         (rst_ni),
+          // read ports
+          .rd_tag_i       (rd_tag),
+          .rd_off_i       (rd_off),
+          .rd_req_i       (rd_req),
+          .rd_tag_only_i  (rd_tag_only),
+          .rd_ack_o       (rd_ack),
+          .rd_vld_bits_o  (rd_vld_bits),
+          .rd_hit_oh_o    (rd_hit_oh),
+          .rd_data_o      (rd_data),
+          // cacheline write port
+          .wr_cl_vld_i    (wr_cl_vld),
+          .wr_cl_we_i     (wr_cl_we),
+          .wr_cl_tag_i    (wr_cl_tag),
+          .wr_cl_data_i   (wr_cl_data),
+          .wr_cl_data_be_i(wr_cl_data_be),
+          .wr_vld_bits_i  (wr_vld_bits),
+          // single word write port
+          .wr_req_i       (wr_req),
+          .wr_ack_o       (wr_ack),
+          .wr_off_i       (wr_off),
+          .wr_data_i      (wr_data),
+          .wr_data_be_i   (wr_data_be)
+      );
+      
+      // FA cache doesn't use user data - tie off
+      assign rd_user = '0;
+      
+    end else begin : gen_sa_dcache_mem  
+      // Set-Associative Cache Implementation (original)
+      wt_cln_dcache_mem #(
+          .CVA6Cfg(CVA6Cfg),
+          .DCACHE_CL_IDX_WIDTH(DCACHE_CL_IDX_WIDTH),
+          .wbuffer_t(wbuffer_t),
+          .NumPorts(NumPorts)
+      ) i_wt_cln_dcache_mem (
+          .clk_i          (clk_i),
+          .rst_ni         (rst_ni),
+          // read ports
+          .rd_prio_i      (rd_prio),
+          .rd_tag_i       (rd_tag),
+          .rd_idx_i       (rd_idx),
+          .rd_off_i       (rd_off),
+          .rd_req_i       (rd_req),
+          .rd_tag_only_i  (rd_tag_only),
+          .rd_ack_o       (rd_ack),
+          .rd_vld_bits_o  (rd_vld_bits),
+          .rd_hit_oh_o    (rd_hit_oh),
+          .rd_data_o      (rd_data),
+          .rd_user_o      (rd_user),
+          // cacheline write port
+          .wr_cl_vld_i    (wr_cl_vld),
+          .wr_cl_nc_i     (wr_cl_nc),
+          .wr_cl_we_i     (wr_cl_we),
+          .wr_cl_tag_i    (wr_cl_tag),
+          .wr_cl_idx_i    (wr_cl_idx),
+          .wr_cl_off_i    (wr_cl_off),
+          .wr_cl_data_i   (wr_cl_data),
+          .wr_cl_user_i   (wr_cl_user),
+          .wr_cl_data_be_i(wr_cl_data_be),
+          .wr_vld_bits_i  (wr_vld_bits),
+          // single word write port
+          .wr_req_i       (wr_req),
+          .wr_ack_o       (wr_ack),
+          .wr_idx_i       (wr_idx),
+          .wr_off_i       (wr_off),
+          .wr_data_i      (wr_data),
+          .wr_user_i      (wr_user),
+          .wr_data_be_i   (wr_data_be),
+          // write buffer forwarding
+          .wbuffer_data_i (wbuffer_data)
+      );
+    end
+  endgenerate
 
   ///////////////////////////////////////////////////////
   // assertions
