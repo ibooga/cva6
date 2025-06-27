@@ -211,10 +211,9 @@ module wt_cln_dcache_missunit
   
   generate
     if (CVA6Cfg.DCACHE_INDEX_WIDTH == 0) begin : gen_fa_valid_bits
-      // FA mode: For now, use a conservative approach - assume all ways could be valid
-      // This forces the replacement logic to use random replacement instead of invalid way first
-      // A more sophisticated implementation would trigger a cache lookup, but that adds complexity
-      assign current_vld_bits = '1; // Conservative: assume all ways valid, use random replacement
+      // FA mode: Use actual valid bits from FA cache to avoid overwriting valid data
+      // This prevents randomly destroying cached data that tests depend on
+      assign current_vld_bits = miss_vld_bits_i[miss_port_idx]; // Use real FA valid bits
     end else begin : gen_sa_valid_bits
       // SA mode: Use port-specific valid bits from last cache access
       assign current_vld_bits = miss_vld_bits_i[miss_port_idx];

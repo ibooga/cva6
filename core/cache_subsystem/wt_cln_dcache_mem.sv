@@ -580,10 +580,12 @@ module wt_cln_dcache_mem
     always_comb begin
       fa_way_valid_d = fa_way_valid_q;
       
-      // For cache line writes, use wr_vld_bits_i to determine valid state
-      // This correctly handles both flush (wr_vld_bits_i='0) and fill (wr_vld_bits_i=one-hot)
+      // Priority order: Cache line writes (miss unit) take priority over single word writes
+      // This ensures coherent state management during fills/flushes
+      
       if (fa_cl_write_req && |fa_write_way) begin
-        // Clear valid bits for ways being written, then set based on wr_vld_bits_i
+        // Cache line writes from miss unit: use wr_vld_bits_i to determine valid state
+        // This correctly handles both flush (wr_vld_bits_i='0) and fill (wr_vld_bits_i=one-hot)
         fa_way_valid_d = (fa_way_valid_q & ~fa_write_way) | wr_vld_bits_i;
         // Debug: Add assertion to track flush vs fill operations
         // synthesis translate_off
@@ -597,10 +599,9 @@ module wt_cln_dcache_mem
           $display("  fa_way_valid_q=%h -> fa_way_valid_d=%h", fa_way_valid_q, fa_way_valid_d);
         end
         // synthesis translate_on
-      end
-      
-      // Set valid bit when single word is written (for write-through)
-      if (fa_word_write_req && |fa_write_way) begin
+      end else if (fa_word_write_req && |fa_write_way) begin
+        // Single word writes (write-through hits): set valid bit for written way
+        // Only execute if no cache line write is happening (priority handling)
         fa_way_valid_d = fa_way_valid_q | fa_write_way;
       end
     end
