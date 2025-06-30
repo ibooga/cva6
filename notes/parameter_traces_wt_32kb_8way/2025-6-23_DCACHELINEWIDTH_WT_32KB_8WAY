@@ -1,0 +1,87 @@
+CVA6ConfigDcacheLineWidth = 128 Signal Flow Tree (32KB 8-way Configuration)
+===========================================================================
+
+1. CONFIGURATION PHASE (cv32a6_imac_sv32_config_pkg.sv)
+   └── localparam CVA6ConfigDcacheLineWidth = 128;
+       └── cva6_cfg.'{ DcacheLineWidth: unsigned'(CVA6ConfigDcacheLineWidth) }
+
+2. BUILD/DERIVATION PHASE (build_config_pkg.sv)
+   └── CVA6Cfg.DcacheLineWidth = 128
+       ├── DCACHE_LINE_WIDTH = CVA6Cfg.DcacheLineWidth = 128
+       ├── DCACHE_OFFSET_WIDTH calculation:
+       │   └── $clog2(CVA6Cfg.DcacheLineWidth / 8)
+       │       └── $clog2(128 / 8) = $clog2(16) = 4 bits
+       │
+       └── DCACHE_USER_LINE_WIDTH calculation:
+           └── (CVA6Cfg.AxiUserWidth == 1) ? 4 : CVA6Cfg.DcacheLineWidth
+               └── 128 bits (assuming AxiUserWidth != 1)
+
+3. MODULE INSTANTIATION PHASE
+   └── std_cache_subsystem (core/cache_subsystem/std_cache_subsystem.sv)
+       └── wt_dcache (core/cache_subsystem/wt_dcache.sv)
+           └── wt_dcache_mem (core/cache_subsystem/wt_dcache_mem.sv)
+               ├── parameter DCACHE_LINE_WIDTH = CONFIG.DCACHE_LINE_WIDTH = 128
+               └── parameter DCACHE_OFFSET_WIDTH = CONFIG.DCACHE_OFFSET_WIDTH = 4
+
+4. MEMORY ORGANIZATION IMPACT
+   └── SRAM Data Width (wt_dcache_mem.sv)
+       └── sram #(
+           ├── .DATA_WIDTH(DCACHE_LINE_WIDTH) → 128 bits per cache line
+           ├── .NUM_WORDS(DCACHE_NUM_WORDS) → 256 words per way
+           └── Each SRAM stores 128-bit cache lines
+
+5. ADDRESS DECODING IMPACT
+   └── Address field extraction:
+       ├── Offset field: addr[DCACHE_OFFSET_WIDTH-1:0] → addr[3:0]
+       │   └── Selects byte within 16-byte cache line
+       ├── Index field: addr[DCACHE_INDEX_WIDTH+DCACHE_OFFSET_WIDTH-1:DCACHE_OFFSET_WIDTH]
+       │   └── addr[15:4] → 12-bit index for 4096 sets
+       └── Tag field: addr[PLEN-1:DCACHE_INDEX_WIDTH+DCACHE_OFFSET_WIDTH]
+           └── addr[31:16] → 16-bit tag
+
+6. DATA PATH IMPACT
+   └── Cache Line Operations:
+       ├── Read data path: 128-bit cache line → CPU word extraction
+       │   └── Byte/halfword/word selection within 128-bit line
+       ├── Write data path: CPU data → 128-bit cache line update
+       │   └── Byte enable logic for partial line writes
+       ├── Fill operations: AXI memory → 128-bit cache line refill
+       └── Write buffer: Stores 128-bit lines for write-through
+
+7. AXI INTERFACE IMPACT (wt_axi_adapter.sv)
+   └── AXI Data Width Conversion:
+       ├── AXI data width: 64 bits (typical)
+       ├── Cache line width: 128 bits
+       └── Burst operations: 2 AXI beats per cache line
+           ├── Beat 0: addr[63:0] → cache_line[63:0]
+           └── Beat 1: addr[127:64] → cache_line[127:64]
+
+8. BYTE ENABLE LOGIC
+   └── Write mask generation:
+       ├── CPU byte enables → 128-bit cache line byte enables
+       ├── 16 byte enable bits (one per byte in line)
+       ├── Offset-based byte enable shifting
+       └── Partial line write support for WT cache
+
+9. PERFORMANCE IMPACT (32KB Configuration)
+   └── 128-bit Cache Lines in 32KB Cache:
+       ├── Total lines: 32768 / 16 = 2048 cache lines
+       ├── Good spatial locality exploitation
+       ├── Efficient memory bandwidth utilization
+       ├── 2-beat AXI transfers optimize bus usage
+       └── Matches typical memory subsystem width
+
+10. CACHE LINE CALCULATIONS
+    └── Line Organization in 32KB 8-way:
+        ├── Lines per way: 256
+        ├── Bytes per line: 16
+        ├── Words per line: 4 (32-bit words)
+        ├── Total lines: 256 × 8 = 2048
+        └── Address bits per line: 4 (offset bits)
+
+KEY RELATIONSHIPS:
+- DcacheLineWidth = 128 bits = 16 bytes defines cache granularity
+- OFFSET_WIDTH = 4 bits addresses 16 bytes within line
+- Optimal for 32-bit RISC-V: 4 instructions per line
+- Standard line size for embedded caches
+- Balances spatial locality vs cache pollution

@@ -1,0 +1,102 @@
+CVA6ConfigWtDcacheWbufDepth = 8 Signal Flow Tree
+================================================
+
+1. CONFIGURATION PHASE (cv32a6_imac_sv32_config_pkg.sv)
+   └── localparam CVA6ConfigWtDcacheWbufDepth = 8;
+       └── cva6_cfg.'{ WtDcacheWbufDepth: int'(CVA6ConfigWtDcacheWbufDepth) }
+
+2. BUILD/DERIVATION PHASE (build_config_pkg.sv)
+   └── CVA6Cfg.WtDcacheWbufDepth = 8
+       └── cfg.WtDcacheWbufDepth = CVA6Cfg.WtDcacheWbufDepth = 8
+
+3. MODULE INSTANTIATION PHASE
+   └── std_cache_subsystem (core/cache_subsystem/std_cache_subsystem.sv)
+       └── wt_cln_dcache_ctrler (core/cache_subsystem/wt_cln_dcache_ctrl.sv)
+           └── parameter WtDcacheWbufDepth = CONFIG.WtDcacheWbufDepth = 8
+
+4. WRITE BUFFER INSTANTIATION
+   └── Write Buffer Implementation:
+       ├── Buffer depth: 8 entries
+       ├── Each entry stores:
+       │   ├── Address: PLEN bits
+       │   ├── Data: DCACHE_LINE_WIDTH bits (128 bits)
+       │   ├── Byte enables: DCACHE_LINE_WIDTH/8 bits (16 bits)
+       │   └── Valid bit: 1 bit
+       └── FIFO-style buffer for write-through operations
+
+5. WRITE-THROUGH OPERATION IMPACT
+   └── WT_CLN Cache Write Flow:
+       ├── CPU write hit:
+       │   ├── Update cache line immediately
+       │   ├── Queue write to write buffer (if space available)
+       │   └── CPU continues without stalling
+       ├── Write buffer management:
+       │   ├── Buffer entry allocation on write hit
+       │   ├── AXI write transaction initiation
+       │   └── Buffer entry deallocation on AXI completion
+       └── Write buffer full handling:
+           ├── CPU write stalls when buffer full
+           └── Backpressure to CPU pipeline
+
+6. PERFORMANCE IMPLICATIONS
+   └── Write Buffer Depth = 8:
+       ├── Burst write capability: Up to 8 outstanding writes
+       ├── Write latency hiding: CPU doesn't wait for memory writes
+       ├── AXI bandwidth utilization: Pipelined write transactions
+       ├── Buffer full scenarios: CPU stalls after 8 outstanding writes
+       └── Memory controller pressure: 8 concurrent write requests
+
+7. AXI INTERFACE IMPACT
+   └── wt_cln_axi_adapter interface:
+       ├── Write buffer feeds AXI write channel
+       ├── AXI write transaction management:
+       │   ├── AWVALID/AWREADY for address phase
+       │   ├── WVALID/WREADY for data phase  
+       │   └── BVALID/BREADY for response phase
+       ├── Outstanding transaction tracking
+       └── Write buffer entry retirement on BVALID
+
+8. CACHE CONTROLLER STATE MACHINE
+   └── Write Buffer State Management:
+       ├── Buffer allocation state
+       ├── AXI transaction initiation state
+       ├── Write completion tracking state
+       ├── Buffer deallocation state
+       └── Full buffer handling state
+
+9. MEMORY CONSISTENCY IMPACT
+   └── Write Ordering with 8-entry Buffer:
+       ├── In-order write allocation to buffer
+       ├── Potential out-of-order completion from memory
+       ├── Write barrier implementation via buffer drain
+       └── FENCE instruction may require buffer flush
+
+10. SIZING CONSIDERATIONS
+    └── WtDcacheWbufDepth = 8 Analysis:
+        ├── Advantages:
+        │   ├── Good write burst capability
+        │   ├── Reasonable memory usage
+        │   ├── Balanced performance vs. complexity
+        │   └── Adequate for most workloads
+        ├── Potential limitations:
+        │   ├── CPU stalls on write-heavy workloads
+        │   ├── Memory controller saturation
+        │   └── Limited outstanding write capability
+        └── Alternative sizing:
+            ├── Smaller (4): Reduced memory, more CPU stalls
+            └── Larger (16): More memory, better burst performance
+
+11. RESOURCE UTILIZATION
+    └── Hardware Cost (8 entries):
+        ├── Address storage: 8 × PLEN bits
+        ├── Data storage: 8 × 128 bits = 1024 bits
+        ├── Byte enable storage: 8 × 16 bits = 128 bits
+        ├── Control logic: FIFO pointers, valid bits
+        └── Total: ~8KB for addresses + 1KB for data + control
+
+KEY RELATIONSHIPS:
+- WtDcacheWbufDepth = 8 provides 8-entry write buffer for WT cache
+- Enables write latency hiding by buffering up to 8 outstanding writes
+- Balances performance (burst writes) vs. memory usage
+- CPU stalls when buffer is full (after 8 pending writes)
+- Critical for write-through cache performance optimization

@@ -1,0 +1,67 @@
+CVA6ConfigDcacheByteSize = 32768 Signal Flow Tree (32KB 8-way Configuration)
+===========================================================================
+
+1. CONFIGURATION PHASE (cv32a6_imac_sv32_config_pkg.sv)
+   └── localparam CVA6ConfigDcacheByteSize = 32768;
+       └── cva6_cfg.'{ DcacheByteSize: unsigned'(CVA6ConfigDcacheByteSize) }
+
+2. BUILD/DERIVATION PHASE (build_config_pkg.sv)
+   └── CVA6Cfg.DcacheByteSize = 32768
+       ├── DCACHE_INDEX_WIDTH calculation:
+       │   └── $clog2(CVA6Cfg.DcacheByteSize / CVA6Cfg.DcacheSetAssoc)
+       │       └── $clog2(32768 / 8) = $clog2(4096) = 12
+       │       └── Standard calculation (not forced to 0)
+       │
+       └── DCACHE_NUM_WORDS calculation:
+           └── 2 ** (DCACHE_INDEX_WIDTH - DCACHE_OFFSET_WIDTH)
+               └── 2 ** (12 - 4) = 2 ** 8 = 256 words per way
+
+3. MODULE INSTANTIATION PHASE
+   └── std_cache_subsystem (core/cache_subsystem/std_cache_subsystem.sv)
+       └── wt_dcache (core/cache_subsystem/wt_dcache.sv)
+           └── wt_dcache_mem (core/cache_subsystem/wt_dcache_mem.sv)
+               └── parameter DCACHE_CL_IDX_WIDTH = CONFIG.DCACHE_INDEX_WIDTH = 12
+
+4. SIGNAL WIDTH IMPACT
+   └── DCACHE_CL_IDX_WIDTH = 12
+       ├── rd_idx_i [DCACHE_CL_IDX_WIDTH-1:0] → [11:0] (12-bit signal)
+       ├── wr_cl_idx_i [DCACHE_CL_IDX_WIDTH-1:0] → [11:0] (12-bit signal)
+       └── cl_index [DCACHE_CL_IDX_WIDTH-1:0] → [11:0] (12-bit signal)
+
+5. MEMORY ORGANIZATION IMPACT
+   └── SRAM Instantiation (wt_dcache_mem.sv)
+       └── for (genvar i = 0; i < DCACHE_SET_ASSOC; i++)
+           └── sram #(.NUM_WORDS(DCACHE_NUM_WORDS))
+               └── NUM_WORDS = 256 (256 entries per way)
+               └── 8 SRAM instances (one per way)
+               └── Each SRAM has depth = 256
+
+6. CACHE GEOMETRY
+   └── 32KB Cache Organization:
+       ├── Total Size: 32768 bytes
+       ├── Line Size: 128 bits = 16 bytes
+       ├── Total Lines: 32768 / 16 = 2048 lines
+       ├── Ways: 8
+       ├── Sets: 2048 / 8 = 256 sets
+       └── Address mapping: 256 sets × 8 ways × 16 bytes
+
+7. ADDRESS DECODING
+   └── Address field extraction (32-bit address):
+       ├── Offset: addr[3:0] (4 bits) → byte within line
+       ├── Index: addr[11:4] (8 bits) → selects one of 256 sets  
+       └── Tag: addr[31:12] (20 bits) → identifies cache line
+
+8. PERFORMANCE IMPACT
+   └── 32KB Cache Benefits:
+       ├── Higher hit rate than smaller caches
+       ├── 256 sets reduces conflict misses
+       ├── Working set fits in cache for many applications
+       ├── Reasonable SRAM area for embedded systems
+       └── Good balance of size vs access time
+
+KEY RELATIONSHIPS:
+- DcacheByteSize = 32768 creates 32KB total cache capacity
+- With 8 ways: 32768 / 8 = 4096 bytes per way
+- INDEX_WIDTH = 12 bits addresses 4096 locations
+- NUM_WORDS = 256 per way (4096 bytes / 16 bytes per line)
+- Provides 16x more capacity than 2KB configuration

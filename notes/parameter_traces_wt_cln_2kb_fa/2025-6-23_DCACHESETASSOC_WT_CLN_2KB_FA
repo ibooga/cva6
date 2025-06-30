@@ -1,0 +1,65 @@
+CVA6ConfigDcacheSetAssoc = 128 Signal Flow Tree
+===============================================
+
+1. CONFIGURATION PHASE (cv32a6_imac_sv32_config_pkg.sv)
+   └── localparam CVA6ConfigDcacheSetAssoc = 128;
+       └── cva6_cfg.'{ DcacheSetAssoc: unsigned'(CVA6ConfigDcacheSetAssoc) }
+
+2. BUILD/DERIVATION PHASE (build_config_pkg.sv)
+   └── CVA6Cfg.DcacheSetAssoc = 128
+       ├── DCACHE_SET_ASSOC = CVA6Cfg.DcacheSetAssoc = 128
+       ├── DCACHE_SET_ASSOC_WIDTH calculation:
+       │   └── CVA6Cfg.DcacheSetAssoc > 1 ? $clog2(CVA6Cfg.DcacheSetAssoc) : CVA6Cfg.DcacheSetAssoc
+       │       └── $clog2(128) = 7 bits
+       │
+       └── Used in INDEX_WIDTH calculation:
+           └── $clog2(CVA6Cfg.DcacheByteSize / CVA6Cfg.DcacheSetAssoc)
+               └── $clog2(2048 / 128) = $clog2(16) = 4 bits
+               └── BUT: Forced to 0 for FA cache
+
+3. MODULE INSTANTIATION PHASE
+   └── std_cache_subsystem (core/cache_subsystem/std_cache_subsystem.sv)
+       └── wt_cln_dcache_ctrler (core/cache_subsystem/wt_cln_dcache_ctrl.sv)
+           └── wt_cln_dcache_mem (core/cache_subsystem/wt_cln_dcache_mem.sv)
+               └── parameter DCACHE_SET_ASSOC = CONFIG.DCACHE_SET_ASSOC = 128
+
+4. MEMORY ARRAY GENERATION
+   └── SRAM Array Generation (wt_cln_dcache_mem.sv:89-103)
+       └── for (genvar i = 0; i < DCACHE_SET_ASSOC; i++)
+           ├── Generate 128 SRAM instances (one per way)
+           ├── Each SRAM: NUM_WORDS = 1 (FA mode), DATA_WIDTH = DCACHE_LINE_WIDTH
+           └── Array indexing: cl_data_way[i], cl_tag_way[i], cl_vld_way[i]
+
+5. ASSOCIATIVITY LOGIC IMPACT
+   └── Way Selection and Comparison:
+       ├── Tag comparison across all 128 ways simultaneously
+       ├── Hit detection: hit_way[DCACHE_SET_ASSOC-1:0] → hit_way[127:0]
+       ├── LRU replacement policy across 128 ways:
+       │   └── plru_tree_i #(.ENTRIES(DCACHE_SET_ASSOC))
+       │       └── 128-way PLRU tree for replacement selection
+       │
+       └── Way multiplexing:
+           ├── rd_data_way[127:0] selection for read hits
+           └── wr_way_sel[127:0] for write operations
+
+6. PERFORMANCE IMPACT
+   └── Fully Associative Behavior:
+       ├── All 128 ways checked on every access
+       ├── Parallel tag comparison: 128 comparators active
+       ├── Complex PLRU tree: log2(128) = 7 levels
+       ├── Way multiplexing: 128:1 mux for data selection
+       └── Higher hit rate vs. increased hardware complexity
+
+7. SIGNAL WIDTH IMPACT
+   └── Associativity-related signals:
+       ├── hit_way[DCACHE_SET_ASSOC-1:0] → hit_way[127:0]
+       ├── way_sel[DCACHE_SET_ASSOC_WIDTH-1:0] → way_sel[6:0]
+       ├── plru_way[DCACHE_SET_ASSOC_WIDTH-1:0] → plru_way[6:0]
+       └── cl_vld_way[DCACHE_SET_ASSOC-1:0] → cl_vld_way[127:0]
+
+KEY RELATIONSHIPS:
+- DcacheSetAssoc = 128 creates 128-way associative cache
+- In FA mode: All 128 ways form single set with index 0
+- Each way stores one cache line (16 bytes with 2KB total / 128 ways)
+- High associativity improves hit rates but increases hardware complexity
+- PLRU tree manages replacement among 128 ways

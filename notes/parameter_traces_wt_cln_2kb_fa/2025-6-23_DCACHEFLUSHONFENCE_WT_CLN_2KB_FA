@@ -1,0 +1,69 @@
+CVA6ConfigDcacheFlushOnFence = 0 Signal Flow Tree
+===============================================
+
+1. CONFIGURATION PHASE (cv32a6_imac_sv32_config_pkg.sv)
+   └── cva6_cfg.'{ DcacheFlushOnFence: bit'(0) }
+       └── Implicitly set to 0 (not explicitly defined in config)
+
+2. BUILD/DERIVATION PHASE (build_config_pkg.sv)
+   └── CVA6Cfg.DcacheFlushOnFence = 0
+       └── cfg.DcacheFlushOnFence = CVA6Cfg.DcacheFlushOnFence = 0
+
+3. MODULE INSTANTIATION PHASE
+   └── std_cache_subsystem (core/cache_subsystem/std_cache_subsystem.sv)
+       └── wt_cln_dcache_ctrler (core/cache_subsystem/wt_cln_dcache_ctrl.sv)
+           └── parameter DcacheFlushOnFence = CONFIG.DcacheFlushOnFence = 0
+
+4. FENCE INSTRUCTION HANDLING
+   └── FENCE instruction processing (core/cva6.sv or cache controller):
+       ├── If DcacheFlushOnFence = 1:
+       │   ├── FENCE instruction triggers cache flush
+       │   ├── All cache lines marked invalid
+       │   └── Memory ordering enforced via cache flush
+       └── If DcacheFlushOnFence = 0: (CURRENT CONFIGURATION)
+           ├── FENCE instruction does NOT flush cache
+           ├── Memory ordering via other mechanisms
+           └── Cache lines remain valid across FENCE
+
+5. FUNCTIONAL IMPACT (DcacheFlushOnFence = 0)
+   └── Memory Consistency Behavior:
+       ├── FENCE instructions preserve cache state
+       ├── Write-through policy ensures memory consistency
+       │   └── All writes immediately visible in memory
+       ├── No performance penalty from cache flushes
+       └── Relies on write-through for ordering guarantees
+
+6. CONTROL FLOW IMPACT
+   └── Cache Controller Logic:
+       ├── FENCE handling simplified (no flush logic needed)
+       ├── No flush state machine required
+       ├── Cache performance maintained across FENCE instructions
+       └── Reduced complexity in cache controller
+
+7. PERFORMANCE IMPLICATIONS
+   └── FENCE Performance (DcacheFlushOnFence = 0):
+       ├── Fast FENCE execution (no cache flush delay)
+       ├── No cache warmup penalty after FENCE
+       ├── Maintained cache hit rates
+       └── Better performance for fence-heavy code
+
+8. MEMORY ORDERING GUARANTEES
+   └── Consistency Model:
+       ├── Write-through cache provides strong ordering
+       ├── All writes immediately visible to other agents
+       ├── FENCE semantics satisfied without cache flush
+       └── Suitable for single-core or cache-coherent systems
+
+9. ALTERNATIVE CONFIGURATION
+   └── If DcacheFlushOnFence = 1 (alternative):
+       ├── Stronger ordering guarantees
+       ├── Cache flush on every FENCE instruction
+       ├── Performance penalty due to cache flushes
+       └── Required for some specific ordering requirements
+
+KEY RELATIONSHIPS:
+- DcacheFlushOnFence = 0 disables cache flush on FENCE instructions
+- Write-through cache policy provides ordering without flushes
+- Improves FENCE performance by avoiding cache flush penalties
+- Suitable for write-through caches with strong memory ordering
+- Reduces cache controller complexity by eliminating flush logic

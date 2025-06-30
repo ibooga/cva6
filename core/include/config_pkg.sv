@@ -36,7 +36,8 @@ package config_pkg;
     WT_HYB = 5,
     WT_HYB_FORCE_SET_ASS = 6,
     WT_HYB_FORCE_FULL_ASS = 7,
-    WT_NEW = 8
+    WT_NEW = 8,
+    WT_CLN = 9
   } cache_type_t;
 
   /// Branch predictor parameter
@@ -363,6 +364,9 @@ package config_pkg;
     int unsigned DCACHE_USER_WIDTH;
     int unsigned DCACHE_OFFSET_WIDTH;
     int unsigned DCACHE_NUM_WORDS;
+    // Flexible FA SRAM organization parameters
+    int unsigned DCACHE_FA_BANKS;
+    int unsigned DCACHE_FA_WAYS_PER_BANK;
 
     int unsigned DCACHE_MAX_TX;
 

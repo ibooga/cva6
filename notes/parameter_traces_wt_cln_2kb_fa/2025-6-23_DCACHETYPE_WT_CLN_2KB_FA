@@ -1,0 +1,45 @@
+CVA6ConfigDcacheType = WT_CLN Signal Flow Tree
+==============================================
+
+1. CONFIGURATION PHASE (cv32a6_imac_sv32_config_pkg.sv)
+   └── localparam config_pkg::cache_type_t CVA6ConfigDcacheType = config_pkg::WT_CLN;
+       └── cva6_cfg.'{ DCacheType: CVA6ConfigDcacheType }
+
+2. BUILD/DERIVATION PHASE (build_config_pkg.sv)
+   └── CVA6Cfg.DCacheType = config_pkg::WT_CLN
+       └── cfg.DCacheType = CVA6Cfg.DCacheType;
+
+3. MODULE INSTANTIATION PHASE
+   └── std_cache_subsystem (core/cache_subsystem/std_cache_subsystem.sv)
+       └── Cache type selection via generate blocks:
+           ├── if (CVA6Cfg.DCacheType == config_pkg::WT_CLN) → Use WT_CLN cache
+           ├── if (CVA6Cfg.DCacheType == config_pkg::WB) → Use WB cache  
+           └── if (CVA6Cfg.DCacheType == config_pkg::WT) → Use WT cache
+
+4. WT_CLN SPECIFIC INSTANTIATION
+   └── wt_cln_dcache_ctrler (core/cache_subsystem/wt_cln_dcache_ctrl.sv)
+       ├── Cache controller for write-through clean policy
+       ├── wt_cln_dcache_mem (core/cache_subsystem/wt_cln_dcache_mem.sv)
+       │   └── Memory array with clean/dirty state tracking
+       └── wt_cln_axi_adapter (core/cache_subsystem/wt_cln_axi_adapter.sv)
+           └── AXI interface adapter for write-through operations
+
+5. FUNCTIONAL IMPACT
+   └── Write-Through Clean Behavior:
+       ├── All writes immediately propagate to memory
+       ├── Cache lines maintain clean state (no dirty bits needed)
+       ├── Simplified coherency (no writeback required)
+       ├── Read hits serve directly from cache
+       └── Write hits update cache and memory simultaneously
+
+6. INTERFACE CONNECTIONS
+   └── Cache controller interfaces:
+       ├── CPU-side: req_port_i/resp_port_o
+       ├── Memory-side: axi_req_o/axi_resp_i  
+       └── Bypass logic for uncacheable addresses
+
+KEY RELATIONSHIPS:
+- DCacheType = WT_CLN selects write-through clean cache architecture
+- Determines cache coherency policy and memory update behavior
+- Affects power consumption (more memory writes) vs. complexity tradeoffs
+- Eliminates need for dirty bit tracking and writeback logic

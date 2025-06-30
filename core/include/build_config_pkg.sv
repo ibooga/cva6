@@ -22,7 +22,8 @@ package build_config_pkg;
     int unsigned NrWbPorts = (CVA6Cfg.CvxifEn || EnableAccelerator) ? 5 : 4;
 
     int unsigned ICACHE_INDEX_WIDTH = $clog2(CVA6Cfg.IcacheByteSize / CVA6Cfg.IcacheSetAssoc);
-    int unsigned DCACHE_INDEX_WIDTH = $clog2(CVA6Cfg.DcacheByteSize / CVA6Cfg.DcacheSetAssoc);
+    // FA MODE: Set INDEX_WIDTH = 0 for fully associative behavior  
+    int unsigned DCACHE_INDEX_WIDTH = 0;
     int unsigned DCACHE_OFFSET_WIDTH = $clog2(CVA6Cfg.DcacheLineWidth / 8);
 
     // MMU
@@ -142,12 +143,39 @@ package build_config_pkg;
     cfg.DCACHE_SET_ASSOC_WIDTH = CVA6Cfg.DcacheSetAssoc > 1 ? $clog2(CVA6Cfg.DcacheSetAssoc) :
         CVA6Cfg.DcacheSetAssoc;
     cfg.DCACHE_INDEX_WIDTH = DCACHE_INDEX_WIDTH;
-    cfg.DCACHE_TAG_WIDTH = cfg.PLEN - DCACHE_INDEX_WIDTH;
+    cfg.DCACHE_TAG_WIDTH = (DCACHE_INDEX_WIDTH == 0) ? 
+                           cfg.PLEN - DCACHE_OFFSET_WIDTH :  // FA: tag excludes offset
+                           cfg.PLEN - DCACHE_INDEX_WIDTH;    // SA: tag excludes index  
     cfg.DCACHE_LINE_WIDTH = CVA6Cfg.DcacheLineWidth;
     cfg.DCACHE_USER_LINE_WIDTH = (CVA6Cfg.AxiUserWidth == 1) ? 4 : CVA6Cfg.DcacheLineWidth;
     cfg.DCACHE_USER_WIDTH = CVA6Cfg.AxiUserWidth;
     cfg.DCACHE_OFFSET_WIDTH = DCACHE_OFFSET_WIDTH;
-    cfg.DCACHE_NUM_WORDS = 2 ** (DCACHE_INDEX_WIDTH - DCACHE_OFFSET_WIDTH);
+    
+    // Comprehensive FA SRAM organization with dynamic scaling using macros
+    
+    // Define macros for FA parameter calculation (processed at preprocessing time)
+    `define FA_TOTAL_LINES(cache_size, line_width) ((cache_size) / ((line_width) / 8))
+    `define FA_OPTIMAL_WAYS(total_lines) (((total_lines) >= 16) ? 16 : \
+                                         ((total_lines) >= 8) ? 8 : (total_lines))
+    `define FA_WORDS_PER_WAY(total_lines, ways) ((total_lines) / (ways))
+    `define FA_FINAL_WORDS(words_per_way) (((words_per_way) < 2) ? 2 : (words_per_way))
+    `define FA_BANKS(ways) (((ways) <= 8) ? 1 : 2)
+    
+    if (DCACHE_INDEX_WIDTH == 0) begin
+      // Fully Associative: Use configured ways if reasonable, otherwise macro-calculated optimal
+      cfg.DCACHE_SET_ASSOC = (CVA6Cfg.DcacheSetAssoc <= `FA_TOTAL_LINES(CVA6Cfg.DcacheByteSize, CVA6Cfg.DcacheLineWidth)) ? 
+                            CVA6Cfg.DcacheSetAssoc : 
+                            `FA_OPTIMAL_WAYS(`FA_TOTAL_LINES(CVA6Cfg.DcacheByteSize, CVA6Cfg.DcacheLineWidth));
+      cfg.DCACHE_NUM_WORDS = `FA_FINAL_WORDS(`FA_WORDS_PER_WAY(`FA_TOTAL_LINES(CVA6Cfg.DcacheByteSize, CVA6Cfg.DcacheLineWidth), cfg.DCACHE_SET_ASSOC));
+      cfg.DCACHE_FA_BANKS = `FA_BANKS(cfg.DCACHE_SET_ASSOC);
+      cfg.DCACHE_FA_WAYS_PER_BANK = cfg.DCACHE_SET_ASSOC / `FA_BANKS(cfg.DCACHE_SET_ASSOC);
+    end else begin
+      // Set-Associative: Standard calculation (unchanged)
+      cfg.DCACHE_SET_ASSOC = CVA6Cfg.DcacheSetAssoc;
+      cfg.DCACHE_NUM_WORDS = 2 ** (DCACHE_INDEX_WIDTH - DCACHE_OFFSET_WIDTH);
+      cfg.DCACHE_FA_BANKS = 1;  // Not used in set-associative mode  
+      cfg.DCACHE_FA_WAYS_PER_BANK = CVA6Cfg.DcacheSetAssoc;
+    end
 
     cfg.DCACHE_MAX_TX = unsigned'(2 ** CVA6Cfg.MemTidWidth);
 

@@ -1,0 +1,84 @@
+CVA6ConfigDcacheFlushOnFence = 0 Signal Flow Tree (32KB 8-way Configuration)
+============================================================================
+
+1. CONFIGURATION PHASE (cv32a6_imac_sv32_config_pkg.sv)
+   └── cva6_cfg.'{ DcacheFlushOnFence: bit'(0) }
+       └── Implicitly set to 0 (not explicitly defined in config)
+
+2. BUILD/DERIVATION PHASE (build_config_pkg.sv)
+   └── CVA6Cfg.DcacheFlushOnFence = 0
+       └── cfg.DcacheFlushOnFence = CVA6Cfg.DcacheFlushOnFence = 0
+
+3. MODULE INSTANTIATION PHASE
+   └── std_cache_subsystem (core/cache_subsystem/std_cache_subsystem.sv)
+       └── wt_dcache (core/cache_subsystem/wt_dcache.sv)
+           └── wt_dcache_ctrl (core/cache_subsystem/wt_dcache_ctrl.sv)
+               └── parameter DcacheFlushOnFence = CONFIG.DcacheFlushOnFence = 0
+
+4. FENCE INSTRUCTION HANDLING
+   └── FENCE instruction processing (wt_dcache_ctrl.sv):
+       ├── If DcacheFlushOnFence = 1:
+       │   ├── FENCE triggers cache flush
+       │   ├── All valid bits cleared
+       │   └── Memory ordering via cache invalidation
+       └── If DcacheFlushOnFence = 0: (CURRENT CONFIGURATION)
+           ├── FENCE does NOT flush cache
+           ├── Write buffer drains to memory
+           ├── Cache lines remain valid
+           └── Memory ordering via write buffer completion
+
+5. FUNCTIONAL IMPACT (DcacheFlushOnFence = 0)
+   └── Memory Consistency Behavior:
+       ├── FENCE preserves cache contents
+       ├── Write-through ensures memory consistency
+       │   └── All writes already visible in memory
+       ├── Write buffer must complete before FENCE
+       ├── No cache warming penalty after FENCE
+       └── Better performance for fence-heavy code
+
+6. WRITE BUFFER INTERACTION
+   └── FENCE with Write Buffer:
+       ├── Write buffer drains on FENCE
+       ├── All pending writes complete
+       ├── Memory ordering guaranteed
+       ├── Cache remains populated
+       └── No refill traffic after FENCE
+
+7. CONTROL FLOW IMPACT
+   └── Cache Controller Logic:
+       ├── FENCE handling simplified
+       ├── No flush state machine activation
+       ├── Only write buffer drain required
+       ├── Faster FENCE completion
+       └── Less complex control logic
+
+8. PERFORMANCE IMPLICATIONS (32KB Cache)
+   └── FENCE Performance Benefits:
+       ├── No 2048 line invalidation overhead
+       ├── Cache hits continue after FENCE
+       ├── Working set preserved
+       ├── Critical for 32KB cache efficiency
+       └── Especially important for larger caches
+
+9. MEMORY ORDERING GUARANTEES
+   └── Write-Through Consistency:
+       ├── All stores immediately visible
+       ├── Write buffer provides ordering
+       ├── FENCE ensures write completion
+       ├── TSO-compliant behavior
+       └── Suitable for single-core systems
+
+10. COMPARISON WITH FLUSH-ON-FENCE
+    └── Performance Difference (32KB cache):
+        ├── Without flush: FENCE takes ~10s of cycles
+        ├── With flush: FENCE takes ~1000s of cycles
+        ├── No refill penalty (significant for 32KB)
+        ├── Maintains temporal locality
+        └── Critical for real-time applications
+
+KEY RELATIONSHIPS:
+- DcacheFlushOnFence = 0 preserves 32KB cache contents
+- Write-through policy ensures consistency without flush
+- Write buffer drain provides required ordering
+- Essential for maintaining 32KB cache effectiveness
+- Standard configuration for WT caches

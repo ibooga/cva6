@@ -1,0 +1,59 @@
+CVA6ConfigDcacheType = WT Signal Flow Tree (32KB 8-way Configuration)
+=====================================================================
+
+1. CONFIGURATION PHASE (cv32a6_imac_sv32_config_pkg.sv)
+   └── localparam config_pkg::cache_type_t CVA6ConfigDcacheType = config_pkg::WT;
+       └── cva6_cfg.'{ DCacheType: CVA6ConfigDcacheType }
+
+2. BUILD/DERIVATION PHASE (build_config_pkg.sv)
+   └── CVA6Cfg.DCacheType = config_pkg::WT
+       └── cfg.DCacheType = CVA6Cfg.DCacheType;
+
+3. MODULE INSTANTIATION PHASE
+   └── std_cache_subsystem (core/cache_subsystem/std_cache_subsystem.sv)
+       └── Cache type selection via generate blocks:
+           ├── if (CVA6Cfg.DCacheType == config_pkg::WT) → Use WT cache ✓
+           ├── if (CVA6Cfg.DCacheType == config_pkg::WB) → Use WB cache
+           └── if (CVA6Cfg.DCacheType == config_pkg::WT_CLN) → Use WT_CLN cache
+
+4. WT SPECIFIC INSTANTIATION
+   └── wt_dcache (core/cache_subsystem/wt_dcache.sv)
+       ├── wt_dcache_ctrl (core/cache_subsystem/wt_dcache_ctrl.sv)
+       │   └── Cache controller for write-through policy
+       ├── wt_dcache_mem (core/cache_subsystem/wt_dcache_mem.sv)
+       │   └── Memory array without clean/dirty tracking
+       ├── wt_dcache_wbuffer (core/cache_subsystem/wt_dcache_wbuffer.sv)
+       │   └── Write buffer for write-through operations
+       └── wt_axi_adapter (core/cache_subsystem/wt_axi_adapter.sv)
+           └── AXI interface adapter for write-through operations
+
+5. FUNCTIONAL IMPACT
+   └── Write-Through Behavior:
+       ├── All writes immediately propagate to memory
+       ├── No dirty bit tracking required
+       ├── Simplified coherency (no writeback logic)
+       ├── Read hits serve directly from cache
+       ├── Write hits update cache and write buffer simultaneously
+       └── Write buffer provides write latency hiding
+
+6. INTERFACE CONNECTIONS
+   └── Cache controller interfaces:
+       ├── CPU-side: req_ports_i/req_ports_o
+       ├── Memory-side: axi_req_o/axi_resp_i
+       ├── Write buffer interface for outstanding writes
+       └── Bypass logic for uncacheable addresses
+
+7. PERFORMANCE CHARACTERISTICS (32KB 8-way)
+   └── Write-Through with 32KB capacity:
+       ├── Larger cache reduces miss rate
+       ├── 8-way associativity balances complexity vs hit rate
+       ├── Write buffer absorbs write traffic
+       ├── No writeback delays on evictions
+       └── Predictable memory access patterns
+
+KEY RELATIONSHIPS:
+- DCacheType = WT selects standard write-through cache architecture
+- Determines cache write policy and memory update behavior
+- Write buffer critical for performance in WT mode
+- No dirty bit overhead simplifies cache controller
+- 32KB size provides good hit rates for typical workloads

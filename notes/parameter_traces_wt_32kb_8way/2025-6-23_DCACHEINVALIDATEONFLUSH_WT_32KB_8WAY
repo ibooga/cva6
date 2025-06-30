@@ -1,0 +1,91 @@
+CVA6ConfigDcacheInvalidateOnFlush = 0 Signal Flow Tree (32KB 8-way Configuration)
+=================================================================================
+
+1. CONFIGURATION PHASE (cv32a6_imac_sv32_config_pkg.sv)
+   └── cva6_cfg.'{ DcacheInvalidateOnFlush: bit'(0) }
+       └── Implicitly set to 0 (not explicitly defined in config)
+
+2. BUILD/DERIVATION PHASE (build_config_pkg.sv)
+   └── CVA6Cfg.DcacheInvalidateOnFlush = 0
+       └── cfg.DcacheInvalidateOnFlush = CVA6Cfg.DcacheInvalidateOnFlush = 0
+
+3. MODULE INSTANTIATION PHASE
+   └── std_cache_subsystem (core/cache_subsystem/std_cache_subsystem.sv)
+       └── wt_dcache (core/cache_subsystem/wt_dcache.sv)
+           └── wt_dcache_ctrl (core/cache_subsystem/wt_dcache_ctrl.sv)
+               └── parameter DcacheInvalidateOnFlush = CONFIG.DcacheInvalidateOnFlush = 0
+
+4. FLUSH OPERATION BEHAVIOR
+   └── Cache Flush Implementation:
+       ├── If DcacheInvalidateOnFlush = 1:
+       │   ├── Flush invalidates all 2048 cache lines
+       │   ├── Valid bits cleared for all ways/sets
+       │   └── Complete cache miss after flush
+       └── If DcacheInvalidateOnFlush = 0: (CURRENT CONFIGURATION)
+           ├── Flush completes write buffer operations
+           ├── Cache lines remain valid
+           ├── No invalidation of 2048 lines
+           └── Cache hits continue post-flush
+
+5. FUNCTIONAL IMPACT (DcacheInvalidateOnFlush = 0)
+   └── 32KB Cache Behavior:
+       ├── Flush ensures write buffer empty
+       ├── All 2048 cache lines retain data
+       ├── No cold cache penalty
+       ├── Working set preserved
+       └── Critical for 32KB efficiency
+
+6. WRITE-THROUGH CACHE CONSIDERATIONS
+   └── WT Cache Flush Semantics:
+       ├── No dirty data to write back
+       ├── Write buffer already ensures consistency
+       ├── Flush primarily for ordering
+       ├── Invalidation unnecessary for coherency
+       └── Valid data can be safely retained
+
+7. PERFORMANCE IMPLICATIONS (32KB Cache)
+   └── Post-Flush Performance:
+       ├── No reload of 2048 cache lines
+       ├── Saves 32KB of memory traffic
+       ├── Avoids thousands of miss cycles
+       ├── Maintains application performance
+       └── Essential for real-time systems
+
+8. HARDWARE IMPLEMENTATION
+   └── Flush Control Logic:
+       ├── Simple write buffer drain
+       ├── No valid bit clearing logic
+       ├── No set/way iteration required
+       ├── Reduced state machine complexity
+       └── Faster flush completion
+
+9. CACHE UTILIZATION
+   └── 32KB Cache Efficiency:
+       ├── Full 32KB remains available
+       ├── No capacity loss after flush
+       ├── Temporal locality preserved
+       ├── Spatial locality maintained
+       └── Maximum cache effectiveness
+
+10. USE CASE ANALYSIS
+    └── 32KB WT Cache Applications:
+        ├── Embedded systems with stable working sets
+        ├── Real-time applications needing predictability
+        ├── Systems with infrequent cache maintenance
+        ├── Performance-critical code paths
+        └── Single-core processors
+
+11. COMPARISON WITH INVALIDATE-ON-FLUSH
+    └── Performance Impact (32KB cache):
+        ├── Without invalidate: Flush ~100 cycles
+        ├── With invalidate: Flush + 2048 × miss penalty
+        ├── Typical miss penalty: 20-100 cycles
+        ├── Total overhead: 40K-200K cycles saved
+        └── Orders of magnitude difference
+
+KEY RELATIONSHIPS:
+- DcacheInvalidateOnFlush = 0 preserves 32KB cache validity
+- Write-through eliminates need for invalidation
+- Critical for maintaining 32KB cache investment
+- Standard practice for WT caches
+- Enables efficient cache flush operations

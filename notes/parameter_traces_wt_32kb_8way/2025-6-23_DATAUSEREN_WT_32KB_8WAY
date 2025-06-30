@@ -1,0 +1,91 @@
+CVA6ConfigDataUserEn = 0 Signal Flow Tree (32KB 8-way Configuration)
+====================================================================
+
+1. CONFIGURATION PHASE (cv32a6_imac_sv32_config_pkg.sv)
+   └── localparam CVA6ConfigDataUserEn = 0;
+       └── cva6_cfg.'{ DataUserEn: unsigned'(CVA6ConfigDataUserEn) }
+
+2. BUILD/DERIVATION PHASE (build_config_pkg.sv)
+   └── CVA6Cfg.DataUserEn = 0
+       ├── cfg.DATA_USER_EN = CVA6Cfg.DataUserEn = 0
+       ├── cfg.AXI_USER_EN = CVA6Cfg.DataUserEn | CVA6Cfg.FetchUserEn
+       │   └── AXI_USER_EN = 0 | 0 = 0 (assuming FetchUserEn = 0)
+       └── cfg.AxiUserWidth = CVA6Cfg.AxiUserWidth (unused when disabled)
+
+3. MODULE INSTANTIATION PHASE
+   └── std_cache_subsystem (core/cache_subsystem/std_cache_subsystem.sv)
+       └── wt_dcache (core/cache_subsystem/wt_dcache.sv)
+           └── parameter DATA_USER_EN = CONFIG.DATA_USER_EN = 0
+
+4. AXI INTERFACE IMPACT
+   └── wt_axi_adapter (core/cache_subsystem/wt_axi_adapter.sv)
+       ├── AXI USER signal generation:
+       │   └── If DATA_USER_EN = 0: (CURRENT CONFIGURATION)
+       │       ├── AWUSER = '0 (tied to zero)
+       │       ├── ARUSER = '0 (tied to zero)
+       │       └── No user metadata propagation
+       │
+       └── Simplified AXI transactions
+
+5. CACHE LINE STORAGE IMPACT (32KB Cache)
+   └── wt_dcache_mem (core/cache_subsystem/wt_dcache_mem.sv)
+       └── If DATA_USER_EN = 0: (CURRENT CONFIGURATION)
+           ├── No user data SRAM instantiated
+           ├── Saves memory for 2048 cache lines
+           ├── Each line saves USER_WIDTH bits
+           └── Significant area reduction for 32KB cache
+
+6. CPU INTERFACE IMPACT
+   └── Data Cache Request Interface:
+       └── If DATA_USER_EN = 0: (CURRENT CONFIGURATION)
+           ├── req_ports_i.user ignored
+           ├── req_ports_o.user = '0
+           ├── No user metadata in transactions
+           └── Simplified request handling
+
+7. MEMORY OVERHEAD SAVINGS (32KB Cache)
+   └── Storage Savings:
+       ├── No user bits per cache line
+       ├── 2048 lines × 0 user bits = 0 overhead
+       ├── Pure data storage efficiency
+       ├── Maximum cache capacity for data
+       └── Important for embedded systems
+
+8. WRITE BUFFER IMPACT
+   └── wt_dcache_wbuffer without user data:
+       ├── Simpler buffer entries
+       ├── No user field storage
+       ├── Reduced buffer complexity
+       ├── Faster buffer operations
+       └── Lower power consumption
+
+9. PERFORMANCE IMPLICATIONS
+   └── Benefits of DATA_USER_EN = 0:
+       ├── Reduced cache access latency
+       ├── Simplified hit/miss logic
+       ├── No user data comparison
+       ├── Streamlined data paths
+       └── Lower dynamic power
+
+10. AREA IMPACT (32KB Configuration)
+    └── Silicon Area Savings:
+        ├── No user SRAM arrays
+        ├── Reduced multiplexing logic
+        ├── Simpler comparators
+        ├── Smaller cache controller
+        └── Cost-effective implementation
+
+11. USE CASES
+    └── DATA_USER_EN = 0 suitable for:
+        ├── Standard embedded processors
+        ├── Systems without security extensions
+        ├── Basic cache implementations
+        ├── Cost-sensitive designs
+        └── Maximum performance applications
+
+KEY RELATIONSHIPS:
+- DataUserEn = 0 eliminates AXI user signals
+- Reduces 32KB cache complexity significantly
+- No storage overhead for 2048 cache lines
+- Standard configuration for basic caches
+- Maximizes data storage efficiency
